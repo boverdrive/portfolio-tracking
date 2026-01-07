@@ -1,0 +1,61 @@
+[package]
+name = "portfolio-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# HTTP client for external APIs
+reqwest = { version = "0.12", features = ["json"] }
+
+# CORS and middleware
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Environment and configuration
+dotenvy = "0.15"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# UUID for IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# OAuth2
+oauth2 = "4.4"
+
+# JWT
+jsonwebtoken = "9"
+
+# Password hashing (for local login option)
+bcrypt = "0.15"
+
+# Cookie handling
+axum-extra = { version = "0.9", features = ["cookie"] }
+
+# URL encoding
+urlencoding = "2.1"
+
+# Time for cookie duration
+time = "0.3"
+
+# Job scheduler for background tasks
+tokio-cron-scheduler = "0.10"
+
+# Random number generation
+rand = "0.9"

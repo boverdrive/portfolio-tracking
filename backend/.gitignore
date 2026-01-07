@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+Cargo.lock
+.env
+.env*
+pb_data/
+pocketbase
+*.db
+*.db-journal
+test_*.rs
