@@ -44,6 +44,14 @@ async function fetchApi<T>(
     });
 
     if (!response.ok) {
+        if (response.status === 401) {
+            // Token expired or invalid
+            localStorage.removeItem(TOKEN_KEY);
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
+        }
+
         const error = await response.json().catch(() => ({ error: 'Unknown error' }));
         throw new Error(error.error || error.message || `Request failed: ${response.status}`);
     }
@@ -94,8 +102,13 @@ export async function getTransactionsByType(
 
 // ==================== Portfolio API ====================
 
-export async function getPortfolio(): Promise<PortfolioResponse> {
-    return fetchApi<PortfolioResponse>('/api/portfolio');
+export async function getPortfolio(options?: { includeClosedPositions?: boolean }): Promise<PortfolioResponse> {
+    const params = new URLSearchParams();
+    if (options?.includeClosedPositions) {
+        params.set('include_closed', 'true');
+    }
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    return fetchApi<PortfolioResponse>(`/api/portfolio${queryString}`);
 }
 
 export async function getPortfolioSummary(): Promise<PortfolioSummary> {
@@ -366,6 +379,50 @@ export interface SeedResponse {
 
 export async function seedSymbols(): Promise<SeedResponse> {
     return fetchApi<SeedResponse>('/api/symbols/seed', {
+        method: 'POST',
+    });
+}
+
+// ==================== Portfolio Snapshots API ====================
+
+export interface PortfolioSnapshotAsset {
+    symbol: string;
+    asset_type: string;
+    market?: string;
+    quantity: number;
+    avg_cost: number;
+    current_price: number;
+    current_value: number;
+    unrealized_pnl: number;
+    unrealized_pnl_percent: number;
+}
+
+export interface PortfolioSnapshot {
+    id: string;
+    user_id: string;
+    account_id?: string;
+    date: string;
+    total_invested: number;
+    total_current_value: number;
+    total_unrealized_pnl: number;
+    total_unrealized_pnl_percent: number;
+    total_realized_pnl: number;
+    assets_count?: number | null;
+    currency: string;
+    assets?: PortfolioSnapshotAsset[];
+}
+
+export async function getSnapshots(days?: number): Promise<PortfolioSnapshot[]> {
+    const params = days ? `?days=${days}` : '';
+    return fetchApi<PortfolioSnapshot[]>(`/api/snapshots${params}`);
+}
+
+export async function getSnapshotsRange(from: string, to: string): Promise<PortfolioSnapshot[]> {
+    return fetchApi<PortfolioSnapshot[]>(`/api/snapshots?from=${from}&to=${to}`);
+}
+
+export async function createSnapshotNow(): Promise<{ message: string; date: string }> {
+    return fetchApi('/api/snapshots/now', {
         method: 'POST',
     });
 }

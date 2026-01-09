@@ -1,36 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import { useAuth } from '@/lib/auth';
 import { useSettings } from '@/contexts/SettingsContext';
+import ChangePasswordModal from '@/components/ChangePasswordModal';
 
 export default function ProfilePage() {
-    const { user, linkedProviders, providers, login, logout, unlinkProvider, refreshUser, isLoading } = useAuth();
+    const { user, linkedProviders, providers, login, logout, logoutAll, unlinkProvider, refreshUser, isLoading } = useAuth();
     const { t } = useSettings();
+    const router = useRouter();
     const [isEditing, setIsEditing] = useState(false);
     const [name, setName] = useState(user?.name || '');
     const [isSaving, setIsSaving] = useState(false);
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+    const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
 
-    if (isLoading) {
+    // Auto-redirect to login if not authenticated
+    useEffect(() => {
+        if (!isLoading && !user) {
+            router.push('/login');
+        }
+    }, [isLoading, user, router]);
+
+    if (isLoading || !user) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
-            </div>
-        );
-    }
-
-    if (!user) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-                <div className="text-center">
-                    <p className="text-gray-400 mb-4">{t('กรุณาเข้าสู่ระบบ', 'Please login')}</p>
-                    <Link href="/login" className="text-emerald-400 hover:underline">
-                        {t('ไปหน้า Login', 'Go to Login')}
-                    </Link>
-                </div>
             </div>
         );
     }
@@ -50,6 +48,7 @@ export default function ProfilePage() {
     };
 
     const getProviderIcon = (provider: string) => {
+        if (!provider || typeof provider !== 'string') return '🔗';
         switch (provider.toLowerCase()) {
             case 'google': return '🔵';
             case 'oidc': return '🔐';
@@ -58,6 +57,7 @@ export default function ProfilePage() {
     };
 
     const getProviderName = (provider: string) => {
+        if (!provider || typeof provider !== 'string') return provider;
         switch (provider.toLowerCase()) {
             case 'google': return 'Google';
             case 'oidc': return providers?.oidc?.name || 'OIDC';
@@ -218,7 +218,17 @@ export default function ProfilePage() {
                                         : t('ยังไม่ได้ตั้งค่า', 'Not set')}
                                 </div>
                             </div>
-                            <button className="px-3 py-1.5 text-sm text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all">
+                            <button
+                                onClick={() => {
+                                    if (user.has_local_password) {
+                                        setShowChangePasswordModal(true);
+                                    } else {
+                                        // TODO: Handle set password flow
+                                        alert('ฟีเจอร์ตั้งรหัสผ่านยังไม่เปิดใช้งาน');
+                                    }
+                                }}
+                                className="px-3 py-1.5 text-sm text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all"
+                            >
                                 {user.has_local_password
                                     ? t('เปลี่ยนรหัสผ่าน', 'Change password')
                                     : t('ตั้งรหัสผ่าน', 'Set password')}
@@ -227,7 +237,7 @@ export default function ProfilePage() {
 
                         {/* Logout all devices */}
                         <button
-                            onClick={logout}
+                            onClick={logoutAll}
                             className="w-full p-4 text-left bg-rose-500/10 hover:bg-rose-500/20 rounded-lg border border-rose-500/20 transition-all"
                         >
                             <div className="text-rose-400 font-medium">{t('ออกจากระบบทุกอุปกรณ์', 'Logout from all devices')}</div>
@@ -248,6 +258,11 @@ export default function ProfilePage() {
                     </Link>
                 </section>
             </main>
+
+            <ChangePasswordModal
+                isOpen={showChangePasswordModal}
+                onClose={() => setShowChangePasswordModal(false)}
+            />
         </div>
     );
 }

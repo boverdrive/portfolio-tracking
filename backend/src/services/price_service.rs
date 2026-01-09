@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::error::AppError;
 use crate::models::{AssetType, Market};
+use crate::services::rate_limiter::RateLimiter;
 
 /// Cached price entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +23,7 @@ pub struct PriceService {
     client: reqwest::Client,
     config: Config,
     cache: Arc<RwLock<HashMap<String, PriceEntry>>>,
+    rate_limiter: Option<RateLimiter>,
 }
 
 impl PriceService {
@@ -30,6 +32,49 @@ impl PriceService {
             client: reqwest::Client::new(),
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
+            rate_limiter: None,
+        }
+    }
+    
+    /// Create PriceService with rate limiter
+    pub fn with_rate_limiter(config: Config, rate_limiter: RateLimiter) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            config,
+            cache: Arc::new(RwLock::new(HashMap::new())),
+            rate_limiter: Some(rate_limiter),
+        }
+    }
+    
+    /// Set rate limiter after creation
+    pub fn set_rate_limiter(&mut self, rate_limiter: RateLimiter) {
+        self.rate_limiter = Some(rate_limiter);
+    }
+    
+    /// Check rate limit before making API call
+    async fn check_rate_limit(&self, api_name: &str) -> Result<(), AppError> {
+        if let Some(ref limiter) = self.rate_limiter {
+            if !limiter.can_request(api_name).await {
+                return Err(AppError::ExternalApiError(format!(
+                    "Rate limit exceeded for {}. Please wait before retrying.",
+                    api_name
+                )));
+            }
+        }
+        Ok(())
+    }
+    
+    /// Record successful API call
+    async fn record_api_call(&self, api_name: &str) {
+        if let Some(ref limiter) = self.rate_limiter {
+            limiter.record_request(api_name).await;
+        }
+    }
+    
+    /// Record rate limit hit (429 response)
+    async fn record_rate_limit_hit(&self, api_name: &str, retry_after: Option<u64>) {
+        if let Some(ref limiter) = self.rate_limiter {
+            limiter.record_rate_limit_hit(api_name, retry_after).await;
         }
     }
 
@@ -120,12 +165,22 @@ impl PriceService {
                             return Ok(entry);
                         }
                         Err(e) => {
-                            tracing::warn!("Binance API failed for {}: {}, falling back to CoinGecko", symbol, e);
+                            tracing::warn!("Binance Spot API failed for {}: {}, trying Futures...", symbol, e);
+                            // Try Futures API
+                            match self.fetch_binance_futures_price(symbol).await {
+                                Ok(entry) => {
+                                    tracing::info!("Binance Futures price for {}: {} {}", symbol, entry.price, entry.currency);
+                                    return Ok(entry);
+                                }
+                                Err(e2) => {
+                                    tracing::warn!("Binance Futures API failed for {}: {}, falling back to CoinGecko", symbol, e2);
+                                }
+                            }
                         }
                     }
                 }
-                Market::Okx | Market::Htx | Market::Kucoin => {
-                    // Use OKX API for OKX, HTX, KuCoin markets (USDT pairs)
+                Market::Okx => {
+                    // Use OKX API for OKX market (USDT pairs)
                     tracing::info!("Using OKX API for {} (market: {:?})", symbol, m);
                     match self.fetch_okx_price(symbol).await {
                         Ok(entry) => {
@@ -134,6 +189,32 @@ impl PriceService {
                         }
                         Err(e) => {
                             tracing::warn!("OKX API failed for {}: {}, falling back to CoinGecko", symbol, e);
+                        }
+                    }
+                }
+                Market::Kucoin => {
+                    // Use KuCoin API for KuCoin market (USDT pairs)
+                    tracing::info!("Using KuCoin API for {} (market: {:?})", symbol, m);
+                    match self.fetch_kucoin_price(symbol).await {
+                        Ok(entry) => {
+                            tracing::info!("KuCoin price for {}: {} {}", symbol, entry.price, entry.currency);
+                            return Ok(entry);
+                        }
+                        Err(e) => {
+                            tracing::warn!("KuCoin API failed for {}: {}, falling back to CoinGecko", symbol, e);
+                        }
+                    }
+                }
+                Market::Htx => {
+                    // Use HTX (Huobi) API for HTX market (USDT pairs)
+                    tracing::info!("Using HTX API for {} (market: {:?})", symbol, m);
+                    match self.fetch_htx_price(symbol).await {
+                        Ok(entry) => {
+                            tracing::info!("HTX price for {}: {} {}", symbol, entry.price, entry.currency);
+                            return Ok(entry);
+                        }
+                        Err(e) => {
+                            tracing::warn!("HTX API failed for {}: {}, falling back to CoinGecko", symbol, e);
                         }
                     }
                 }
@@ -150,6 +231,9 @@ impl PriceService {
 
     /// Fetch price from Bitkub API (returns THB price)
     async fn fetch_bitkub_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Check rate limit first
+        self.check_rate_limit("bitkub").await?;
+        
         // Bitkub uses THB_BTC format
         let pair = format!("THB_{}", symbol.to_uppercase());
         let url = format!(
@@ -164,7 +248,15 @@ impl PriceService {
             .header("Accept", "application/json")
             .send()
             .await?;
+        
+        // Record the API call
+        self.record_api_call("bitkub").await;
 
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("bitkub", None).await;
+            return Err(AppError::ExternalApiError("Bitkub rate limit exceeded".to_string()));
+        }
+        
         if !response.status().is_success() {
             return Err(AppError::ExternalApiError(format!(
                 "Bitkub API error: {}",
@@ -194,6 +286,9 @@ impl PriceService {
 
     /// Fetch price from Binance API (returns USDT price)
     async fn fetch_binance_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Check rate limit first
+        self.check_rate_limit("binance").await?;
+        
         // Binance uses BTCUSDT format
         let pair = format!("{}USDT", symbol.to_uppercase());
         let url = format!(
@@ -208,7 +303,15 @@ impl PriceService {
             .header("Accept", "application/json")
             .send()
             .await?;
+        
+        // Record the API call
+        self.record_api_call("binance").await;
 
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("binance", None).await;
+            return Err(AppError::ExternalApiError("Binance rate limit exceeded".to_string()));
+        }
+        
         if !response.status().is_success() {
             return Err(AppError::ExternalApiError(format!(
                 "Binance API error: {}",
@@ -235,9 +338,75 @@ impl PriceService {
             updated_at: Utc::now(),
         })
     }
+    
+    /// Fetch price from Binance Futures API (Perpetual contracts)
+    async fn fetch_binance_futures_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Check rate limit (use same binance limit)
+        self.check_rate_limit("binance").await?;
+        
+        // Binance Futures uses BTCUSDT format for perps
+        let symbol_upper = symbol.to_uppercase();
+        let pair = if symbol_upper.ends_with("USDT") {
+            symbol_upper.clone()
+        } else {
+            format!("{}USDT", symbol_upper)
+        };
+        
+        let url = format!(
+            "https://fapi.binance.com/fapi/v1/ticker/price?symbol={}",
+            pair
+        );
+
+        tracing::info!("Fetching futures price from Binance Futures: {}", url);
+
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        
+        // Record the API call
+        self.record_api_call("binance").await;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("binance", None).await;
+            return Err(AppError::ExternalApiError("Binance Futures rate limit exceeded".to_string()));
+        }
+        
+        if !response.status().is_success() {
+            return Err(AppError::ExternalApiError(format!(
+                "Binance Futures API error: {}",
+                response.status()
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        // Binance Futures response: { "symbol": "XAGUSDT", "price": "76.9300", "time": 123... }
+        let usdt_price = data
+            .get("price")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| AppError::ExternalApiError(format!(
+                "Could not parse Binance Futures price for {}",
+                symbol
+            )))?;
+
+        tracing::info!("Binance Futures price for {}: {} USDT", symbol, usdt_price);
+
+        Ok(PriceEntry {
+            symbol: symbol.to_uppercase(),
+            price: usdt_price,
+            currency: "USDT".to_string(),
+            updated_at: Utc::now(),
+        })
+    }
 
     /// Fetch price from OKX API (returns USD price)
     async fn fetch_okx_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Check rate limit first
+        self.check_rate_limit("okx").await?;
+        
         // OKX uses BTC-USDT format
         let inst_id = format!("{}-USDT", symbol.to_uppercase());
         let url = format!(
@@ -252,6 +421,14 @@ impl PriceService {
             .header("Accept", "application/json")
             .send()
             .await?;
+        
+        // Record the API call
+        self.record_api_call("okx").await;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("okx", None).await;
+            return Err(AppError::ExternalApiError("OKX rate limit exceeded".to_string()));
+        }
 
         if !response.status().is_success() {
             return Err(AppError::ExternalApiError(format!(
@@ -284,8 +461,122 @@ impl PriceService {
         })
     }
 
+    /// Fetch price from KuCoin API (returns USDT price)
+    async fn fetch_kucoin_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Check rate limit first
+        self.check_rate_limit("kucoin").await?;
+        
+        // KuCoin uses BTC-USDT format
+        let pair = format!("{}-USDT", symbol.to_uppercase());
+        let url = format!(
+            "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={}",
+            pair
+        );
+
+        tracing::info!("Fetching crypto price from KuCoin: {}", url);
+
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        
+        // Record the API call
+        self.record_api_call("kucoin").await;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("kucoin", None).await;
+            return Err(AppError::ExternalApiError("KuCoin rate limit exceeded".to_string()));
+        }
+
+        if !response.status().is_success() {
+            return Err(AppError::ExternalApiError(format!(
+                "KuCoin API error: {}",
+                response.status()
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        // KuCoin response format: { "code": "200000", "data": { "price": "91136", ... } }
+        let usdt_price = data
+            .get("data")
+            .and_then(|d| d.get("price"))
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .ok_or_else(|| AppError::ExternalApiError(format!(
+                "Could not parse KuCoin price for {}",
+                symbol
+            )))?;
+
+        Ok(PriceEntry {
+            symbol: symbol.to_uppercase(),
+            price: usdt_price,
+            currency: "USDT".to_string(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    /// Fetch price from HTX (Huobi) API (returns USDT price)
+    async fn fetch_htx_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Check rate limit first
+        self.check_rate_limit("htx").await?;
+        
+        // HTX uses btcusdt format (lowercase)
+        let pair = format!("{}usdt", symbol.to_lowercase());
+        let url = format!(
+            "https://api.huobi.pro/market/detail/merged?symbol={}",
+            pair
+        );
+
+        tracing::info!("Fetching crypto price from HTX: {}", url);
+
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        
+        // Record the API call
+        self.record_api_call("htx").await;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("htx", None).await;
+            return Err(AppError::ExternalApiError("HTX rate limit exceeded".to_string()));
+        }
+
+        if !response.status().is_success() {
+            return Err(AppError::ExternalApiError(format!(
+                "HTX API error: {}",
+                response.status()
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        // HTX response format: { "status": "ok", "tick": { "close": 91116.86, ... } }
+        let usdt_price = data
+            .get("tick")
+            .and_then(|t| t.get("close"))
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| AppError::ExternalApiError(format!(
+                "Could not parse HTX price for {}",
+                symbol
+            )))?;
+
+        Ok(PriceEntry {
+            symbol: symbol.to_uppercase(),
+            price: usdt_price,
+            currency: "USDT".to_string(),
+            updated_at: Utc::now(),
+        })
+    }
+
     /// Fetch cryptocurrency price from CoinGecko API
     async fn fetch_coingecko_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Check rate limit first - CoinGecko Free tier is very strict!
+        self.check_rate_limit("coingecko").await?;
+        
         let coin_id = self.get_coingecko_id(symbol);
         let url = format!(
             "{}/simple/price?ids={}&vs_currencies=thb,usd",
@@ -300,6 +591,15 @@ impl PriceService {
             .header("Accept", "application/json")
             .send()
             .await?;
+        
+        // Record the API call
+        self.record_api_call("coingecko").await;
+
+        if response.status().as_u16() == 429 {
+            // CoinGecko rate limit - block for 60 seconds
+            self.record_rate_limit_hit("coingecko", Some(60)).await;
+            return Err(AppError::ExternalApiError("CoinGecko rate limit exceeded. Please wait 60 seconds.".to_string()));
+        }
 
         if !response.status().is_success() {
             return Err(AppError::ExternalApiError(format!(
@@ -327,111 +627,310 @@ impl PriceService {
         })
     }
 
-    /// Fetch Thai stock price (mock - Settrade API requires credentials)
+    /// Fetch Thai stock price from Yahoo Finance API
+    /// Uses symbol.BK format (e.g., PTT.BK, ADVANC.BK)
     async fn fetch_thai_stock_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
-        tracing::warn!(
-            "Using mock price for {}. Settrade API integration pending.", 
-            symbol
+        // Check rate limit first
+        self.check_rate_limit("yahoo_finance").await?;
+        
+        // Determine if it's a stock or futures/derivatives
+        let symbol_upper = symbol.to_uppercase();
+        
+        // TFEX symbols (Futures) - use mock prices as Yahoo doesn't have them
+        if symbol_upper.starts_with("S50") || symbol_upper.starts_with("GF") || 
+           symbol_upper.starts_with("GD") || symbol_upper.starts_with("SV") ||
+           symbol_upper.starts_with("USD") || symbol_upper.starts_with("BRN") ||
+           symbol_upper.starts_with("TSR") || symbol_upper.starts_with("BANK") ||
+           symbol_upper.starts_with("ENRG") || symbol_upper.ends_with("H24") ||
+           symbol_upper.ends_with("M24") || symbol_upper.ends_with("U24") ||
+           symbol_upper.ends_with("Z24") || symbol_upper.ends_with("H25") ||
+           symbol_upper.ends_with("M25") || symbol_upper.ends_with("U25") ||
+           symbol_upper.ends_with("Z25") || symbol_upper.ends_with("H26") ||
+           symbol_upper.ends_with("M26") {
+            return self.fetch_tfex_mock_price(&symbol_upper).await;
+        }
+        
+        // For SET stocks, use Yahoo Finance with .BK suffix
+        let yahoo_symbol = format!("{}.BK", symbol_upper);
+        let url = format!(
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+            yahoo_symbol
         );
 
-        // Mock prices for common Thai stocks
-        let mock_prices: HashMap<&str, f64> = [
-            ("PTT", 32.50), ("ADVANC", 245.00), ("CPALL", 58.25),
-            ("AOT", 62.00), ("KBANK", 135.50), ("SCB", 98.75),
-            ("GULF", 42.25), ("DELTA", 850.00), ("BTS", 5.85),
-            ("TRUE", 8.40), ("INTUCH", 72.50), ("BDMS", 27.75),
-            ("SCC", 295.00), ("PTTEP", 142.50), ("PTTGC", 42.00),
-            // SET50 Index Futures - around 920-930 points
-            ("S50", 925.00), 
-            ("S50H24", 920.00), ("S50M24", 922.00), ("S50U24", 924.00), ("S50Z24", 926.00),
-            ("S50H25", 925.00), ("S50M25", 927.00), ("S50U25", 929.00), ("S50Z25", 931.00),
-            ("S50H26", 928.00), ("S50M26", 930.00), ("S50U26", 932.00), ("S50Z26", 934.00),
-            // Gold Futures (10 Baht) - around 35,000-36,000 THB
-            ("GFH24", 35200.0), ("GFM24", 35300.0), ("GFU24", 35400.0), ("GFZ24", 35500.0),
-            ("GFH25", 35600.0), ("GFM25", 35700.0), ("GFU25", 35800.0), ("GFZ25", 35900.0),
-            ("GFH26", 36000.0), ("GFM26", 36100.0),
-            // Gold-D (50 Baht) - around 175,000-180,000 THB
-            ("GDH24", 176000.0), ("GDM24", 176500.0), ("GDU24", 177000.0), ("GDZ24", 177500.0),
-            ("GDH25", 178000.0), ("GDM25", 178500.0), ("GDU25", 179000.0), ("GDZ25", 179500.0),
-            ("GDH26", 180000.0), ("GDM26", 180500.0),
-            // Silver Futures - around 950-1000 THB per oz
-            ("SVH24", 955.0), ("SVM24", 960.0), ("SVU24", 965.0), ("SVZ24", 970.0),
-            ("SVH25", 975.0), ("SVM25", 980.0), ("SVH26", 990.0),
-            // USD Futures - around 34-35 THB
-            ("USDH24", 34.50), ("USDM24", 34.55), ("USDU24", 34.60), ("USDZ24", 34.65),
-            ("USDH25", 34.70), ("USDM25", 34.75), ("USDU25", 34.80), ("USDZ25", 34.85),
-            ("USDH26", 34.90), ("USDM26", 34.95),
-            // Sector Futures
-            ("BANKH24", 480.0), ("BANKM24", 482.0), ("ENRGH24", 1850.0), ("ENRGM24", 1855.0),
-            // Single Stock Futures (SSF) - based on underlying stock prices
-            ("PTTH24", 32.80), ("PTTM24", 32.90), ("AOTH24", 62.50), ("AOTM24", 62.80),
-            ("CPALLH24", 58.50), ("CPALLM24", 58.80), ("DELTAH24", 855.0), ("DELTAM24", 858.0),
-            ("ADVH24", 246.0), ("ADVM24", 247.0), ("SCBH24", 99.0), ("SCBM24", 99.5),
-            ("KBANKH24", 136.0), ("KBANKM24", 136.5), ("GULFH24", 42.50), ("GULFM24", 42.80),
-            // Brent Crude Oil Futures - around 2,700-2,800 THB
-            ("BRNH24", 2750.0), ("BRNM24", 2760.0), ("BRNU24", 2770.0), ("BRNZ24", 2780.0),
-            ("BRNH25", 2790.0), ("BRNM25", 2800.0), ("BRNH26", 2820.0), ("BRNM26", 2830.0),
-            // Rubber Futures (RSS3) - around 55-60 THB/kg
-            ("TSRH24", 56.0), ("TSRM24", 56.5), ("TSRU24", 57.0), ("TSRZ24", 57.5),
-            ("TSRH25", 58.0), ("TSRM25", 58.5),
-        ].into_iter().collect();
+        tracing::info!("Fetching Thai stock price from Yahoo Finance: {}", url);
 
-        let price = mock_prices
-            .get(symbol.to_uppercase().as_str())
-            .copied()
-            .unwrap_or(100.0);
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await?;
+        
+        // Record the API call
+        self.record_api_call("yahoo_finance").await;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
+            return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
+        }
+
+        if !response.status().is_success() {
+            tracing::warn!("Yahoo Finance API failed for {}, using mock", symbol);
+            return self.fetch_tfex_mock_price(&symbol_upper).await;
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        // Yahoo Finance response format: chart.result[0].meta.regularMarketPrice
+        let price = data
+            .get("chart")
+            .and_then(|c| c.get("result"))
+            .and_then(|r| r.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|item| item.get("meta"))
+            .and_then(|meta| meta.get("regularMarketPrice"))
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| {
+                tracing::warn!("Could not parse Yahoo Finance price for {}", symbol);
+                AppError::ExternalApiError(format!("Could not parse price for {}", symbol))
+            })?;
+
+        tracing::info!("Yahoo Finance price for {}: {} THB", symbol, price);
 
         Ok(PriceEntry {
-            symbol: symbol.to_uppercase(),
+            symbol: symbol_upper,
             price,
             currency: "THB".to_string(),
             updated_at: Utc::now(),
         })
     }
+    
+    /// Fetch TFEX prices - tries Yahoo Finance first, then falls back to mock
+    async fn fetch_tfex_mock_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Try to fetch from Yahoo Finance first for supported symbols
+        if let Some((yahoo_symbol, currency)) = self.get_tfex_yahoo_symbol(symbol) {
+            if let Ok(entry) = self.fetch_yahoo_futures_price(symbol, &yahoo_symbol, currency).await {
+                return Ok(entry);
+            }
+        }
+        
+        // Fallback to mock prices
+        tracing::debug!("Using mock price for TFEX symbol: {}", symbol);
+        
+        // Mock prices for TFEX symbols
+        let mock_prices: HashMap<&str, f64> = [
+            // SET50 Index Futures
+            ("S50", 925.00), 
+            ("S50H24", 920.00), ("S50M24", 922.00), ("S50U24", 924.00), ("S50Z24", 926.00),
+            ("S50H25", 925.00), ("S50M25", 927.00), ("S50U25", 929.00), ("S50Z25", 931.00),
+            ("S50H26", 928.00), ("S50M26", 930.00), ("S50U26", 932.00), ("S50Z26", 934.00),
+            // Gold Futures (10 Baht)
+            ("GFH24", 35200.0), ("GFM24", 35300.0), ("GFU24", 35400.0), ("GFZ24", 35500.0),
+            ("GFH25", 35600.0), ("GFM25", 35700.0), ("GFU25", 35800.0), ("GFZ25", 35900.0),
+            ("GFH26", 36000.0), ("GFM26", 36100.0),
+            // Gold-D (50 Baht)
+            ("GDH24", 176000.0), ("GDM24", 176500.0), ("GDU24", 177000.0), ("GDZ24", 177500.0),
+            ("GDH25", 178000.0), ("GDM25", 178500.0), ("GDU25", 179000.0), ("GDZ25", 179500.0),
+            ("GDH26", 180000.0), ("GDM26", 180500.0),
+            // Silver Futures
+            ("SVH24", 955.0), ("SVM24", 960.0), ("SVU24", 965.0), ("SVZ24", 970.0),
+            ("SVH25", 975.0), ("SVM25", 980.0), ("SVH26", 990.0),
+            // USD Futures
+            ("USDH24", 34.50), ("USDM24", 34.55), ("USDU24", 34.60), ("USDZ24", 34.65),
+            ("USDH25", 34.70), ("USDM25", 34.75), ("USDU25", 34.80), ("USDZ25", 34.85),
+            ("USDH26", 34.90), ("USDM26", 34.95),
+            // Sector Futures
+            ("BANKH24", 480.0), ("BANKM24", 482.0), ("ENRGH24", 1850.0), ("ENRGM24", 1855.0),
+            // Brent Crude Oil Futures
+            ("BRNH24", 2750.0), ("BRNM24", 2760.0), ("BRNU24", 2770.0), ("BRNZ24", 2780.0),
+            ("BRNH25", 2790.0), ("BRNM25", 2800.0), ("BRNH26", 2820.0), ("BRNM26", 2830.0),
+            // Rubber Futures
+            ("TSRH24", 56.0), ("TSRM24", 56.5), ("TSRU24", 57.0), ("TSRZ24", 57.5),
+            ("TSRH25", 58.0), ("TSRM25", 58.5),
+        ].into_iter().collect();
 
-    /// Fetch foreign stock price (mock - Alpha Vantage API requires key)
+        let price = mock_prices
+            .get(symbol)
+            .copied()
+            .unwrap_or(100.0);
+
+        Ok(PriceEntry {
+            symbol: symbol.to_string(),
+            price,
+            currency: "THB".to_string(),
+            updated_at: Utc::now(),
+        })
+    }
+    
+    /// Map TFEX symbols to Yahoo Finance symbols
+    fn get_tfex_yahoo_symbol(&self, symbol: &str) -> Option<(String, &'static str)> {
+        // Map TFEX symbols to Yahoo Finance equivalents
+        match symbol {
+            // SET50 Index/Futures - use SET50 Index
+            s if s.starts_with("S50") => Some(("^SET50.BK".to_string(), "THB")),
+            // Gold Futures - use international gold futures
+            s if s.starts_with("GF") || s.starts_with("GD") => Some(("GC=F".to_string(), "USD")),
+            // Silver Futures
+            s if s.starts_with("SV") => Some(("SI=F".to_string(), "USD")),
+            // Brent Crude Oil
+            s if s.starts_with("BRN") => Some(("BZ=F".to_string(), "USD")),
+            // USD/THB - no direct equivalent, fallback to mock
+            _ => None,
+        }
+    }
+    
+    /// Fetch futures price from Yahoo Finance
+    async fn fetch_yahoo_futures_price(
+        &self, 
+        original_symbol: &str,
+        yahoo_symbol: &str, 
+        currency: &str
+    ) -> Result<PriceEntry, AppError> {
+        self.check_rate_limit("yahoo_finance").await?;
+        
+        let url = format!(
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+            yahoo_symbol
+        );
+
+        tracing::info!("Fetching TFEX price from Yahoo Finance: {} -> {}", original_symbol, url);
+
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await?;
+        
+        self.record_api_call("yahoo_finance").await;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
+            return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
+        }
+
+        if !response.status().is_success() {
+            return Err(AppError::ExternalApiError(format!(
+                "Yahoo Finance API error: {}",
+                response.status()
+            )));
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        let price = data
+            .get("chart")
+            .and_then(|c| c.get("result"))
+            .and_then(|r| r.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|item| item.get("meta"))
+            .and_then(|meta| meta.get("regularMarketPrice"))
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| {
+                AppError::ExternalApiError(format!("Could not parse price for {}", original_symbol))
+            })?;
+
+        tracing::info!("Yahoo Finance {} price for {}: {} {}", yahoo_symbol, original_symbol, price, currency);
+
+        Ok(PriceEntry {
+            symbol: original_symbol.to_string(),
+            price,
+            currency: currency.to_string(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    /// Fetch foreign stock price from Yahoo Finance
     async fn fetch_foreign_stock_price(
         &self, 
         symbol: &str,
         market: Option<&Market>,
     ) -> Result<PriceEntry, AppError> {
-        tracing::warn!(
-            "Using mock price for foreign stock {}. Alpha Vantage API integration pending.", 
-            symbol
+        // Check rate limit first
+        self.check_rate_limit("yahoo_finance").await?;
+        
+        let symbol_upper = symbol.to_uppercase();
+        
+        // Try Yahoo Finance first
+        let url = format!(
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+            symbol_upper
         );
 
-        // Mock prices for popular US/foreign stocks
+        tracing::info!("Fetching foreign stock price from Yahoo Finance: {}", url);
+
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await?;
+        
+        // Record the API call
+        self.record_api_call("yahoo_finance").await;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
+            return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
+        }
+
+        if !response.status().is_success() {
+            tracing::warn!("Yahoo Finance API failed for {}, using mock", symbol);
+            return self.fetch_foreign_stock_mock(&symbol_upper, market);
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        // Yahoo Finance response format: chart.result[0].meta
+        let meta = data
+            .get("chart")
+            .and_then(|c| c.get("result"))
+            .and_then(|r| r.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|item| item.get("meta"));
+            
+        if let Some(meta) = meta {
+            let price = meta.get("regularMarketPrice")
+                .and_then(|v| v.as_f64());
+            let currency = meta.get("currency")
+                .and_then(|v| v.as_str())
+                .unwrap_or("USD");
+                
+            if let Some(price) = price {
+                tracing::info!("Yahoo Finance price for {}: {} {}", symbol, price, currency);
+                
+                return Ok(PriceEntry {
+                    symbol: symbol_upper,
+                    price,
+                    currency: currency.to_string(),
+                    updated_at: Utc::now(),
+                });
+            }
+        }
+        
+        // Fallback to mock if parsing fails
+        tracing::warn!("Could not parse Yahoo Finance response for {}, using mock", symbol);
+        self.fetch_foreign_stock_mock(&symbol_upper, market)
+    }
+    
+    /// Fallback mock prices for foreign stocks
+    fn fetch_foreign_stock_mock(&self, symbol: &str, market: Option<&Market>) -> Result<PriceEntry, AppError> {
+        tracing::debug!("Using mock price for foreign stock: {}", symbol);
+        
+        // Mock prices for popular stocks
         let mock_prices: HashMap<&str, (f64, &str)> = [
-            // US Tech - NYSE/NASDAQ (prices in USD)
             ("AAPL", (175.50, "USD")), ("MSFT", (378.25, "USD")),
-            ("GOOGL", (141.80, "USD")), ("GOOG", (142.50, "USD")),
-            ("AMZN", (178.75, "USD")), ("NVDA", (495.00, "USD")),
-            ("META", (355.20, "USD")), ("TSLA", (248.50, "USD")),
-            ("AMD", (145.30, "USD")), ("INTC", (45.80, "USD")),
-            // US Finance
-            ("JPM", (185.40, "USD")), ("BAC", (34.50, "USD")),
-            ("GS", (385.00, "USD")), ("MS", (92.50, "USD")),
-            // US Other
-            ("JNJ", (158.75, "USD")), ("PG", (150.20, "USD")),
-            ("KO", (59.80, "USD")), ("PEP", (172.50, "USD")),
-            ("DIS", (92.30, "USD")), ("NFLX", (485.00, "USD")),
-            // European stocks
-            ("BP", (5.25, "GBP")), ("HSBC", (6.45, "GBP")),
-            ("SAP", (178.50, "EUR")), ("ASML", (685.00, "EUR")),
-            ("NVO", (105.80, "USD")), // Novo Nordisk ADR
-            // Asian stocks
-            ("TSM", (105.50, "USD")), // Taiwan Semi ADR
-            ("BABA", (78.50, "USD")), ("JD", (28.50, "USD")),
-            ("SONY", (85.20, "USD")), ("TM", (185.00, "USD")),
+            ("GOOGL", (141.80, "USD")), ("NVDA", (495.00, "USD")),
+            ("TSLA", (248.50, "USD")), ("META", (355.20, "USD")),
         ].into_iter().collect();
 
         let (price, currency) = mock_prices
-            .get(symbol.to_uppercase().as_str())
+            .get(symbol)
             .copied()
             .unwrap_or((100.0, market.map(|m| m.default_currency()).unwrap_or("USD")));
 
         Ok(PriceEntry {
-            symbol: symbol.to_uppercase(),
+            symbol: symbol.to_string(),
             price,
             currency: currency.to_string(),
             updated_at: Utc::now(),

@@ -7,6 +7,7 @@ import AssetList from '@/components/AssetList';
 import TransactionForm from '@/components/TransactionForm';
 import TransactionList from '@/components/TransactionList';
 import AccountManager from '@/components/AccountManager';
+import PerformanceChart from '@/components/PerformanceChart';
 import Footer from '@/components/Footer';
 import { useSettings } from '@/contexts/SettingsContext';
 import {
@@ -19,7 +20,7 @@ import {
 import { Transaction, PortfolioResponse, PortfolioAsset, PortfolioSummary as PortfolioSummaryType } from '@/types';
 
 export default function Dashboard() {
-    const { t } = useSettings();
+    const { t, displayCurrency, setDisplayCurrency } = useSettings();
     const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -28,7 +29,6 @@ export default function Dashboard() {
     const [error, setError] = useState<string | null>(null);
 
     // Global currency selector
-    const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('THB');
     const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
     const [isLoadingRates, setIsLoadingRates] = useState(false);
 
@@ -37,6 +37,9 @@ export default function Dashboard() {
 
     // Editing transaction
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+
+    // Show closed positions toggle
+    const [showClosedPositions, setShowClosedPositions] = useState(false);
 
     // Fetch exchange rates when display currency changes
     useEffect(() => {
@@ -165,7 +168,7 @@ export default function Dashboard() {
         try {
             setError(null);
             const [portfolioData, transactionsData] = await Promise.all([
-                getPortfolio(),
+                getPortfolio({ includeClosedPositions: showClosedPositions }),
                 getTransactions(),
             ]);
             setPortfolio(portfolioData);
@@ -176,7 +179,7 @@ export default function Dashboard() {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [showClosedPositions]);
 
     useEffect(() => {
         fetchData();
@@ -362,6 +365,11 @@ export default function Dashboard() {
                             />
                         </section>
 
+                        {/* Performance Chart */}
+                        <section className="animate-fade-in">
+                            <PerformanceChart displayCurrency={displayCurrency} />
+                        </section>
+
                         {/* Quick Actions */}
                         <div className="flex gap-3">
                             <Link
@@ -404,6 +412,20 @@ export default function Dashboard() {
                             >
                                 {t('ประวัติการซื้อขาย', 'Transaction History')} ({filteredTransactions.length})
                             </button>
+
+                            {/* Show Closed Positions Toggle */}
+                            <label className="flex items-center gap-2 ml-auto px-3 py-2 text-sm cursor-pointer">
+                                <span className="text-gray-400">{t('แสดงสินทรัพย์ที่ขายแล้ว', 'Show Closed')}</span>
+                                <div className="relative">
+                                    <input
+                                        type="checkbox"
+                                        checked={showClosedPositions}
+                                        onChange={(e) => setShowClosedPositions(e.target.checked)}
+                                        className="sr-only peer"
+                                    />
+                                    <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-gray-400 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-white"></div>
+                                </div>
+                            </label>
                         </div>
 
                         {/* Tab content */}

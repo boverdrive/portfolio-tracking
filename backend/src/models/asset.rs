@@ -17,6 +17,7 @@ pub struct PortfolioAsset {
     pub current_value: f64,
     pub unrealized_pnl: f64,
     pub unrealized_pnl_percent: f64,
+    pub realized_pnl: f64,            // Realized P&L from closed portions
     #[serde(default = "default_leverage")]
     pub leverage: f64,        // Leverage/multiplier for futures
 }
@@ -38,6 +39,7 @@ impl PortfolioAsset {
             current_value: 0.0,
             unrealized_pnl: 0.0,
             unrealized_pnl_percent: 0.0,
+            realized_pnl: 0.0,
             leverage: 1.0,
         }
     }

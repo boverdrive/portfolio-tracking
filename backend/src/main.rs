@@ -9,13 +9,13 @@ use axum::{
     Router, Json,
     extract::State,
 };
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::Config;
-use services::{PocketBaseClient, PriceService, ExchangeRateService, AuthService, JobScheduler, SymbolsService};
+use services::{PocketBaseClient, PriceService, ExchangeRateService, AuthService, JobScheduler, SymbolsService, RateLimiter};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,11 +25,33 @@ pub struct AppState {
     pub auth_service: AuthService,
     pub job_scheduler: JobScheduler,
     pub symbols_service: SymbolsService,
+    pub rate_limiter: RateLimiter,
     pub config: Arc<Config>,
 }
 
 #[tokio::main]
 async fn main() {
+    // Load .env file if it exists
+    match dotenvy::dotenv() {
+        Ok(path) => println!("✅ Loaded .env file from: {:?}", path),
+        Err(e) => println!("⚠️ Failed to load .env file: {}", e),
+    }
+
+    println!("📂 Current Working Directory: {:?}", std::env::current_dir());
+    println!("🔍 Environment Variables Check:");
+    for (key, value) in std::env::vars() {
+        if key.contains("ADMIN") || key.contains("POCKETBASE") {
+            let masked = if value.is_empty() { 
+                "(empty)".to_string() 
+            } else if value.len() > 3 { 
+                format!("{}***", &value[0..3]) 
+            } else { 
+                "***".to_string() 
+            };
+            println!("   - {}: {}", key, masked);
+        }
+    }
+
     // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
@@ -47,10 +69,18 @@ async fn main() {
 
     // Initialize services
     let db = PocketBaseClient::new(config.clone());
-    let price_service = PriceService::new(config.clone());
+    let rate_limiter = RateLimiter::new(db.clone(), config.pocketbase_url.clone());
+    
+    // Initialize rate limiter first (needed by price_service)
+    if let Err(e) = rate_limiter.initialize().await {
+        tracing::warn!("Failed to initialize rate limiter: {}", e);
+    }
+    
+    // Create price service with rate limiter
+    let price_service = PriceService::with_rate_limiter(config.clone(), rate_limiter.clone());
     let exchange_rate_service = ExchangeRateService::new(config.clone());
     let auth_service = AuthService::new(config.clone(), db.clone()).await;
-    let job_scheduler = JobScheduler::new(config.clone(), db.clone());
+    let job_scheduler = JobScheduler::new(config.clone(), db.clone(), price_service.clone());
     let symbols_service = SymbolsService::new(config.pocketbase_url.clone(), db.clone());
     
     // Initialize job scheduler (load jobs from database)
@@ -65,6 +95,7 @@ async fn main() {
         auth_service,
         job_scheduler,
         symbols_service,
+        rate_limiter,
         config: Arc::new(config),
     };
 
@@ -87,6 +118,8 @@ async fn main() {
         .route("/api/auth/unlink/:provider", delete(handlers::unlink_provider))
         .route("/api/auth/local/login", post(handlers::local_login))
         .route("/api/auth/local/register", post(handlers::local_register))
+        .route("/api/auth/logout-all", post(handlers::logout_all_devices))
+        .route("/api/auth/change-password", post(handlers::change_password))
         
         // Transaction routes
         .route("/api/transactions", get(handlers::list_transactions))
@@ -141,6 +174,13 @@ async fn main() {
         .route("/api/admin/users/:id", patch(handlers::update_user))
         .route("/api/admin/users/:id", delete(handlers::delete_user))
         .route("/api/admin/users/:id/reset-password", post(handlers::reset_user_password))
+        
+        // Portfolio snapshot routes
+        .route("/api/snapshots", get(handlers::get_snapshots))
+        .route("/api/snapshots/now", post(handlers::create_snapshot_now))
+        
+        // Rate limit routes
+        .route("/api/rate-limits", get(handlers::get_rate_limits))
         
         // Add middleware
         .layer(TraceLayer::new_for_http())

@@ -33,7 +33,9 @@ struct AdminAuthResponse {
 
 #[derive(Debug, Deserialize)]
 struct AdminData {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     email: String,
 }
 
@@ -65,8 +67,8 @@ impl PocketBaseClient {
 
     /// Authenticate as Admin to PocketBase
     async fn authenticate(&self) -> Result<String, AppError> {
-        let email = self.config.admin_email.as_deref().unwrap_or("");
-        let password = self.config.admin_password.as_deref().unwrap_or("");
+        let email = self.config.pb_admin_email.as_deref().unwrap_or("");
+        let password = self.config.pb_admin_password.as_deref().unwrap_or("");
 
         if email.is_empty() {
              tracing::warn!("⚠️ POCKETBASE_ADMIN_EMAIL not set. Skipping admin authentication.");

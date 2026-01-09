@@ -121,6 +121,7 @@ export interface PortfolioAsset {
   current_value: number;
   unrealized_pnl: number;
   unrealized_pnl_percent: number;
+  realized_pnl: number;         // Realized P&L from closed portions
 }
 
 export interface PortfolioSummary {

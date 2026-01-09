@@ -29,6 +29,9 @@ pub struct Config {
     // Initial admin user
     pub admin_email: Option<String>,
     pub admin_password: Option<String>,
+    // PocketBase connection credentials (infrastructure)
+    pub pb_admin_email: Option<String>,
+    pub pb_admin_password: Option<String>,
 }
 
 impl Config {
@@ -82,8 +85,12 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok()),
             // Initial admin user
-            admin_email: env::var("POCKETBASE_ADMIN_EMAIL").ok().filter(|v| !v.is_empty()).or_else(|| env::var("ADMIN_EMAIL").ok().filter(|v| !v.is_empty())),
-            admin_password: env::var("POCKETBASE_ADMIN_PASSWORD").ok().filter(|v| !v.is_empty()).or_else(|| env::var("ADMIN_PASSWORD").ok().filter(|v| !v.is_empty())),
+            // Initial admin user (Business Logic)
+            admin_email: env::var("ADMIN_EMAIL").ok().filter(|v| !v.is_empty()),
+            admin_password: env::var("ADMIN_PASSWORD").ok().filter(|v| !v.is_empty()),
+            // PocketBase connection credentials (Infrastructure)
+            pb_admin_email: env::var("POCKETBASE_ADMIN_EMAIL").ok().filter(|v| !v.is_empty()),
+            pb_admin_password: env::var("POCKETBASE_ADMIN_PASSWORD").ok().filter(|v| !v.is_empty()),
         }
     }
 

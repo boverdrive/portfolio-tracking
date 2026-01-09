@@ -1,7 +1,7 @@
 use axum::{
     extract::{Query, State, Path},
-    http::{header, StatusCode},
-    response::{IntoResponse, Redirect, Response},
+    http::StatusCode,
+    response::{IntoResponse, Redirect},
     Json,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar};
@@ -339,6 +339,51 @@ pub async fn unlink_provider(
     Ok(Json(serde_json::json!({"message": format!("Unlinked {}", provider)})))
 }
 
+/// POST /api/auth/logout-all - Logout from all devices
+pub async fn logout_all_devices(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<impl IntoResponse, AppError> {
+    let user = extract_user_from_cookie(&state, &jar).await?;
+    
+    state.auth_service.logout_all_devices(&user.id).await?;
+    
+    // Also clear current cookie
+    let cookie = Cookie::build((AUTH_COOKIE_NAME, ""))
+        .path("/")
+        .http_only(true)
+        .max_age(time::Duration::seconds(0))
+        .build();
+    
+    Ok((jar.remove(cookie), Json(serde_json::json!({"message": "Logged out from all devices"}))))
+}
+
+/// POST /api/auth/change-password - Change password and logout all sessions
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub old_password: String,
+    pub new_password: String,
+}
+
+pub async fn change_password(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<ChangePasswordRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let user = extract_user_from_cookie(&state, &jar).await?;
+    
+    state.auth_service.change_password(&user.id, &req.old_password, &req.new_password).await?;
+    
+    // Clear current cookie (user needs to login again with new password)
+    let cookie = Cookie::build((AUTH_COOKIE_NAME, ""))
+        .path("/")
+        .http_only(true)
+        .max_age(time::Duration::seconds(0))
+        .build();
+        
+    Ok((jar.remove(cookie), Json(serde_json::json!({"message": "Password changed successfully"}))))
+}
+
 // ==================== Token Validation ====================
 
 /// POST /api/auth/verify - Verify JWT token
@@ -353,6 +398,12 @@ pub async fn verify_token(
 ) -> Result<Json<UserResponse>, AppError> {
     let claims = state.auth_service.verify_jwt(&req.token)?;
     let user = state.auth_service.get_user(&claims.sub).await?;
+
+    // Check token version
+    if claims.token_version != user.token_version {
+         return Err(AppError::Unauthorized("Token expired (version mismatch)".to_string()));
+    }
+    
     Ok(Json(UserResponse::from(&user)))
 }
 
@@ -366,5 +417,10 @@ async fn extract_user_from_cookie(state: &AppState, jar: &CookieJar) -> Result<U
     let claims = state.auth_service.verify_jwt(cookie.value())?;
     let user = state.auth_service.get_user(&claims.sub).await?;
     
+    // Check token version
+    if claims.token_version != user.token_version {
+         return Err(AppError::Unauthorized("Token expired (version mismatch)".to_string()));
+    }
+
     Ok(user)
 }

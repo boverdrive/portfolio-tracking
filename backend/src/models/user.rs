@@ -3,15 +3,33 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// OAuth provider types - supports both well-known and custom OIDC providers
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "lowercase")]
+/// OAuth provider types - supports both well-known and custom OIDC providers
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OAuthProvider {
     Google,
     GitHub,
     Line,
     /// Custom OIDC provider (e.g., PocketID, Keycloak, Auth0)
-    #[serde(rename = "custom")]
     Custom(String),
+}
+
+impl Serialize for OAuthProvider {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for OAuthProvider {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 impl OAuthProvider {
@@ -65,6 +83,9 @@ pub struct User {
     pub local_password_hash: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Token version for invalidating old sessions (increment on logout/password change)
+    #[serde(default)]
+    pub token_version: i32,
 }
 
 /// Generate a PocketBase compatible ID (15 chars, a-z0-9)
@@ -92,6 +113,7 @@ impl User {
             local_password_hash: None,
             created_at: now,
             updated_at: now,
+            token_version: 0,
         }
     }
     
@@ -201,6 +223,9 @@ pub struct Claims {
     pub exp: usize,
     /// Issued at (as UTC timestamp)
     pub iat: usize,
+    /// Token version (must match user's current version)
+    #[serde(default)]
+    pub token_version: i32,
 }
 
 /// Google user info from OAuth

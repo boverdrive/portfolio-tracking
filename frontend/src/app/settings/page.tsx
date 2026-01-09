@@ -831,97 +831,131 @@ function ExchangeRateSettings() {
     );
 }
 
+type SettingsSection = 'general' | 'language' | 'currency' | 'assets' | 'markets' | 'exchange' | 'prices' | 'jobs' | 'system';
+
 export default function SettingsPage() {
     const { t } = useSettings();
     const { user } = useAuth();
-    const [activeTab, setActiveTab] = useState<'general' | 'master'>('general');
+    const [activeSection, setActiveSection] = useState<SettingsSection>('general');
 
-    const tabs = [
-        { id: 'general' as const, label: t('ทั่วไป', 'General'), icon: '⚙️' },
-        { id: 'master' as const, label: t('Master Data', 'Master Data'), icon: '📋' },
+    const menuItems: { id: SettingsSection; label: string; icon: string; description: string; isLink?: boolean; href?: string }[] = [
+        { id: 'general', label: t('ทั่วไป', 'General'), icon: '⚙️', description: t('ตั้งค่าทั่วไปของแอป', 'General app settings') },
+        { id: 'language', label: t('ภาษา', 'Language'), icon: '🌐', description: t('เปลี่ยนภาษาที่ใช้แสดงผล', 'Change display language') },
+        { id: 'currency', label: t('สกุลเงิน', 'Currency'), icon: '💰', description: t('จัดการสกุลเงินที่ใช้', 'Manage currencies') },
+        { id: 'assets', label: t('ประเภทสินทรัพย์', 'Asset Types'), icon: '📊', description: t('จัดการประเภทสินทรัพย์', 'Manage asset types') },
+        { id: 'markets', label: t('ตลาด', 'Markets'), icon: '🏛️', description: t('จัดการตลาดและแหล่งราคา', 'Manage markets & price sources') },
+        { id: 'exchange', label: t('อัตราแลกเปลี่ยน', 'Exchange Rates'), icon: '💱', description: t('ดูอัตราแลกเปลี่ยนปัจจุบัน', 'View current exchange rates') },
+        { id: 'prices', label: t('จัดการราคา', 'Manage Prices'), icon: '📈', description: t('ดูและจัดการราคาสินทรัพย์', 'View and manage asset prices'), isLink: true, href: '/settings/prices' },
+        { id: 'jobs', label: t('Background Jobs', 'Background Jobs'), icon: '🔄', description: t('ตั้งเวลาดึงข้อมูลอัตโนมัติ', 'Schedule automatic data fetching'), isLink: true, href: '/settings/jobs' },
+        { id: 'system', label: t('ระบบ', 'System'), icon: '🔧', description: t('ตั้งค่าระบบและ Seed Data', 'System settings & seed data') },
     ];
+
+    const renderContent = () => {
+        switch (activeSection) {
+            case 'general':
+                return <DefaultSettings />;
+            case 'language':
+                return <LanguageSettings />;
+            case 'currency':
+                return <CurrencySettings />;
+            case 'assets':
+                return <AssetTypeSettings />;
+            case 'markets':
+                return <MarketSettings />;
+            case 'exchange':
+                return <ExchangeRateSettings />;
+            case 'system':
+                return (
+                    <>
+                        <SystemSettings />
+                        <div className="mt-6">
+                            <ResetSettings />
+                        </div>
+                    </>
+                );
+            default:
+                return <DefaultSettings />;
+        }
+    };
+
+    const currentSection = menuItems.find(item => item.id === activeSection);
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
             {/* Top Navigation Bar */}
             <Header currentPage="settings" />
 
-            <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {/* Quick Links */}
-                <div className="mb-6 flex flex-wrap gap-3">
-                    <Link
-                        href="/settings/jobs"
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700/50 rounded-lg text-gray-300 hover:text-white transition-all"
-                    >
-                        ⚙️ {t('Background Jobs', 'Background Jobs')}
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                    </Link>
-                    <Link
-                        href="/settings/prices"
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-gray-800/50 hover:bg-gray-700/50 border border-gray-700/50 rounded-lg text-gray-300 hover:text-white transition-all"
-                    >
-                        💰 {t('จัดการราคา', 'Manage Prices')}
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                    </Link>
-                    {user?.role === 'admin' && (
+            <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                {/* Page Header */}
+                <div className="mb-6">
+                    <h1 className="text-2xl font-bold text-white">{t('ตั้งค่า', 'Settings')}</h1>
+                    <p className="text-gray-400 text-sm mt-1">{t('จัดการการตั้งค่าและการแสดงผล', 'Manage display and notification preferences.')}</p>
+                </div>
+
+                {/* Admin Quick Link */}
+                {user?.role === 'admin' && (
+                    <div className="mb-6">
                         <Link
                             href="/admin/users"
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-800/50 hover:bg-purple-700/50 border border-purple-700/50 rounded-lg text-purple-300 hover:text-white transition-all"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-800/50 hover:bg-purple-700/50 border border-purple-700/50 rounded-lg text-purple-300 hover:text-white transition-all text-sm"
                         >
                             👥 {t('จัดการผู้ใช้', 'Manage Users')}
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                             </svg>
                         </Link>
-                    )}
-                </div>
+                    </div>
+                )}
 
-                {/* Tabs */}
-                <div className="flex gap-2 mb-6">
-                    {tabs.map(tab => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${activeTab === tab.id
-                                ? 'bg-emerald-500/20 text-emerald-400'
-                                : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
-                                }`}
-                        >
-                            <span>{tab.icon}</span>
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
+                {/* Main Layout - Sidebar + Content */}
+                <div className="flex gap-6">
+                    {/* Left Sidebar with Card Frame */}
+                    <aside className="w-64 flex-shrink-0">
+                        <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-2">
+                            <nav className="space-y-1">
+                                {menuItems.map((item) => (
+                                    item.isLink ? (
+                                        <Link
+                                            key={item.id}
+                                            href={item.href!}
+                                            className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-left transition-all text-gray-400 hover:bg-gray-700/50 hover:text-white"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-lg">{item.icon}</span>
+                                                <span className="font-medium">{item.label}</span>
+                                            </div>
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                            </svg>
+                                        </Link>
+                                    ) : (
+                                        <button
+                                            key={item.id}
+                                            onClick={() => setActiveSection(item.id)}
+                                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all ${activeSection === item.id
+                                                ? 'bg-gray-700/70 text-white'
+                                                : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'
+                                                }`}
+                                        >
+                                            <span className="text-lg">{item.icon}</span>
+                                            <span className="font-medium">{item.label}</span>
+                                        </button>
+                                    )
+                                ))}
+                            </nav>
+                        </div>
+                    </aside>
 
-                {/* Content */}
-                <div className="bg-gradient-to-br from-gray-800/90 to-gray-900/90 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6 space-y-6">
-                    {activeTab === 'general' ? (
-                        <>
-                            <LanguageSettings />
-                            <hr className="border-gray-700" />
-                            <DefaultSettings />
-                            <hr className="border-gray-700" />
-                            <ExchangeRateSettings />
-                            <hr className="border-gray-700" />
-                            <ResetSettings />
-                        </>
-                    ) : (
-                        <>
-                            <AssetTypeSettings />
-                            <hr className="border-gray-700" />
-                            <MarketSettings />
-                            <hr className="border-gray-700" />
-                            <CurrencySettings />
-                            <hr className="border-gray-700" />
-                            <SystemSettings />
-                        </>
-                    )}
+                    {/* Right Content Area */}
+                    <div className="flex-1 min-w-0">
+                        {/* Content Card */}
+                        <div className="bg-gradient-to-br from-gray-800/90 to-gray-900/90 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6">
+                            {renderContent()}
+                        </div>
+                    </div>
                 </div>
             </main>
         </div>
     );
 }
+

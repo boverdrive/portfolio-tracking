@@ -26,7 +26,9 @@ fn extract_user_id(state: &AppState, headers: &HeaderMap) -> Result<String, AppE
 /// List all transactions with optional filtering
 #[derive(Debug, Deserialize)]
 pub struct ListTransactionsQuery {
+    #[allow(dead_code)]
     pub asset_type: Option<String>,
+    #[allow(dead_code)]
     pub symbol: Option<String>,
 }
 

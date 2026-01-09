@@ -19,6 +19,8 @@ interface AuthContextType {
     refreshUser: () => Promise<void>;
     refreshLinkedProviders: () => Promise<void>;
     unlinkProvider: (provider: string) => Promise<void>;
+    logoutAll: () => Promise<void>;
+    changePassword: (oldPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -31,22 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [providers, setProviders] = useState<AuthProvidersResponse | null>(null);
     const [linkedProviders, setLinkedProviders] = useState<LinkedProvider[]>([]);
 
-    // Get auth token from URL or localStorage
-    const getToken = useCallback(() => {
-        // Check URL params first (from OAuth callback)
-        if (typeof window !== 'undefined') {
-            const urlParams = new URLSearchParams(window.location.search);
-            const tokenFromUrl = urlParams.get('token');
-            if (tokenFromUrl) {
-                localStorage.setItem(TOKEN_KEY, tokenFromUrl);
-                // Clean URL
-                window.history.replaceState({}, document.title, window.location.pathname);
-                return tokenFromUrl;
-            }
-            return localStorage.getItem(TOKEN_KEY);
-        }
-        return null;
-    }, []);
+
 
     // Fetch available auth providers
     const fetchProviders = useCallback(async () => {
@@ -191,7 +178,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem(TOKEN_KEY);
         setUser(null);
         setLinkedProviders([]);
-    }, []);
+
+        // Show success message and redirect to login
+        alert('ออกจากระบบเรียบร้อยแล้ว');
+        router.push('/login');
+    }, [router]);
 
     // Unlink OAuth provider
     const unlinkProvider = useCallback(async (provider: string) => {
@@ -214,20 +205,95 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [refreshLinkedProviders]);
 
-    // Initialize auth state
+    // Logout from all devices
+    const logoutAll = useCallback(async () => {
+        try {
+            await fetch(`${API_BASE_URL}/api/auth/logout-all`, {
+                method: 'POST',
+                credentials: 'include',
+            });
+        } catch (error) {
+            console.error('Logout all failed:', error);
+        }
+        localStorage.removeItem(TOKEN_KEY);
+        setUser(null);
+        setLinkedProviders([]);
+
+        alert('ออกจากระบบทุกอุปกรณ์เรียบร้อยแล้ว');
+        router.push('/login');
+    }, [router]);
+
+    // Change password
+    const changePassword = useCallback(async (oldPassword: string, newPassword: string) => {
+        try {
+            const token = localStorage.getItem(TOKEN_KEY);
+            const response = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}), // Also send header just in case
+                },
+                body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+                credentials: 'include',
+            });
+
+            if (response.ok) {
+                // Auto logout after password change
+                localStorage.removeItem(TOKEN_KEY);
+                setUser(null);
+                setLinkedProviders([]);
+                alert('เปลี่ยนรหัสผ่านเรียบร้อยแล้ว กรุณาเข้าสู่ระบบใหม่');
+                router.push('/login');
+                return { success: true };
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                return { success: false, error: errorData.error || 'Failed to change password' };
+            }
+        } catch (error) {
+            console.error('Change password failed:', error);
+            return { success: false, error: 'An error occurred. Please try again.' };
+        }
+    }, [router]);
+
+    // Handle token from OAuth callback URL
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const tokenFromUrl = urlParams.get('token');
+
+        if (tokenFromUrl) {
+            // Save token to localStorage
+            localStorage.setItem(TOKEN_KEY, tokenFromUrl);
+
+            // Clean URL immediately
+            window.history.replaceState({}, document.title, window.location.pathname);
+
+            // Verify the token and set user
+            verifyToken(tokenFromUrl).then((success) => {
+                if (success) {
+                    refreshLinkedProviders();
+                }
+            });
+        }
+    }, []); // Run once on mount - the URL check happens before React finishes mounting
+
+    // Initialize auth state (for page load without token in URL)
     useEffect(() => {
         const init = async () => {
             setIsLoading(true);
             await fetchProviders();
-            const token = getToken();
-            if (token) {
+
+            // Only check localStorage if we didn't already handle URL token above
+            const token = localStorage.getItem(TOKEN_KEY);
+            if (token && !user) {
                 await verifyToken(token);
                 await refreshLinkedProviders();
             }
             setIsLoading(false);
         };
         init();
-    }, [fetchProviders, getToken, verifyToken, refreshLinkedProviders]);
+    }, [fetchProviders, verifyToken, refreshLinkedProviders, user]);
 
     const value: AuthContextType = {
         user,
@@ -242,6 +308,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshUser,
         refreshLinkedProviders,
         unlinkProvider,
+        logoutAll,
+        changePassword,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -29,7 +29,7 @@ pub struct JobConfig {
     pub name_en: String,
     #[serde(default)]
     pub job_type: String,           // "api_status_check", "price_update", etc.
-    #[serde(default = "default_interval")]
+    #[serde(default = "default_interval", deserialize_with = "deserialize_interval")]
     pub interval_seconds: u64,      // Interval in seconds (default: 86400 = 1 day)
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -46,10 +46,38 @@ pub struct JobConfig {
     pub created: Option<String>,
     #[serde(default, skip_serializing)]
     pub updated: Option<String>,
-    #[serde(default, skip_serializing)]
-    pub collectionId: Option<String>,
-    #[serde(default, skip_serializing)]
-    pub collectionName: Option<String>,
+    // Optional PocketBase params
+    #[serde(rename = "collectionId")]
+    pub collection_id: Option<String>,
+    #[serde(rename = "collectionName")]
+    pub collection_name: Option<String>,
+    // Catch any other fields from PocketBase
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, serde_json::Value>,
+}
+
+fn deserialize_interval<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_u64() {
+                Ok(i)
+            } else if let Some(f) = n.as_f64() {
+                Ok(f as u64)
+            } else {
+                Err(D::Error::custom("invalid interval number"))
+            }
+        }
+        serde_json::Value::String(s) => {
+            s.parse::<u64>().map_err(|_| D::Error::custom("invalid interval string"))
+        }
+        serde_json::Value::Null => Ok(default_interval()),
+        _ => Err(D::Error::custom("invalid interval type")),
+    }
 }
 
 fn default_interval() -> u64 { 86400 }
@@ -70,8 +98,9 @@ impl Default for JobConfig {
             last_result: None,
             created: None,
             updated: None,
-            collectionId: None,
-            collectionName: None,
+            collection_id: None,
+            collection_name: None,
+            extra: std::collections::HashMap::new(),
         }
     }
 }
@@ -118,9 +147,14 @@ pub struct ApiStatusCheckResult {
 
 /// Common interval presets in seconds
 pub mod intervals {
+    #[allow(dead_code)]
     pub const ONE_HOUR: u64 = 3600;
+    #[allow(dead_code)]
     pub const SIX_HOURS: u64 = 21600;
+    #[allow(dead_code)]
     pub const TWELVE_HOURS: u64 = 43200;
+    #[allow(dead_code)]
     pub const ONE_DAY: u64 = 86400;
+    #[allow(dead_code)]
     pub const ONE_WEEK: u64 = 604800;
 }

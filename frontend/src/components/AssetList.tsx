@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useMemo } from 'react';
 import { PortfolioAsset } from '@/types';
 import { formatCurrency, formatPercent, formatNumber, getAssetTypeName, getMarketName, DisplayCurrency } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -11,8 +12,13 @@ interface Props {
     displayCurrency?: DisplayCurrency;
 }
 
+type SortColumn = 'symbol' | 'quantity' | 'avg_cost' | 'current_price' | 'pnl';
+type SortDirection = 'asc' | 'desc';
+
 export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }: Props) {
     const { t, settings } = useSettings();
+    const [sortColumn, setSortColumn] = useState<SortColumn>('symbol');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
     const formatValue = (value: number) => {
         if (displayCurrency === 'BTC') {
@@ -20,6 +26,70 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
         }
         return formatCurrency(value, displayCurrency);
     };
+
+    // Sort handler
+    const handleSort = (column: SortColumn) => {
+        if (sortColumn === column) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+    };
+
+    // Sorted assets
+    const sortedAssets = useMemo(() => {
+        return [...assets].sort((a, b) => {
+            let aVal: string | number = '';
+            let bVal: string | number = '';
+
+            switch (sortColumn) {
+                case 'symbol':
+                    aVal = a.symbol.toLowerCase();
+                    bVal = b.symbol.toLowerCase();
+                    break;
+                case 'quantity':
+                    aVal = a.quantity;
+                    bVal = b.quantity;
+                    break;
+                case 'avg_cost':
+                    aVal = a.avg_cost;
+                    bVal = b.avg_cost;
+                    break;
+                case 'current_price':
+                    aVal = a.current_price;
+                    bVal = b.current_price;
+                    break;
+                case 'pnl':
+                    aVal = a.unrealized_pnl;
+                    bVal = b.unrealized_pnl;
+                    break;
+            }
+
+            if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }, [assets, sortColumn, sortDirection]);
+
+    // Sortable header component
+    const SortableHeader = ({ column, label, className }: { column: SortColumn; label: string; className?: string }) => (
+        <div
+            className={`cursor-pointer hover:text-white transition-colors select-none flex items-center gap-1 ${className || ''}`}
+            onClick={() => handleSort(column)}
+        >
+            <span>{label}</span>
+            {sortColumn === column && (
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    {sortDirection === 'asc' ? (
+                        <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+                    ) : (
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                    )}
+                </svg>
+            )}
+        </div>
+    );
 
     if (isLoading) {
         return (
@@ -59,32 +129,41 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
         <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 backdrop-blur-sm rounded-xl border border-gray-700/50 overflow-hidden shadow-xl">
             {/* Header */}
             <div className="flex px-6 py-4 bg-gray-700/30 text-sm font-medium text-gray-400 border-b border-gray-700/50">
-                <div className="w-[180px] flex-shrink-0">{t('สินทรัพย์', 'Asset')}</div>
-                <div className="w-[100px] flex-shrink-0 text-right">{t('จำนวน', 'Quantity')}</div>
-                <div className="flex-1 min-w-[150px] text-right">{t('ต้นทุนเฉลี่ย', 'Avg Cost')}</div>
-                <div className="flex-1 min-w-[150px] text-right">{t('ราคาปัจจุบัน', 'Current Price')}</div>
-                <div className="w-[140px] flex-shrink-0 text-right">{t('กำไร/ขาดทุน', 'P&L')}</div>
+                <SortableHeader column="symbol" label={t('สินทรัพย์', 'Asset')} className="flex-1" />
+                <SortableHeader column="quantity" label={t('จำนวน', 'Quantity')} className="flex-1 justify-end" />
+                <SortableHeader column="avg_cost" label={t('ต้นทุนเฉลี่ย', 'Avg Cost')} className="flex-1 justify-end" />
+                <SortableHeader column="current_price" label={t('ราคาปัจจุบัน', 'Current Price')} className="flex-1 justify-end" />
+                <SortableHeader column="pnl" label={t('กำไร/ขาดทุน', 'P&L')} className="flex-1 justify-end" />
             </div>
 
             {/* Asset rows */}
             <div className="divide-y divide-gray-700/50">
-                {assets.map((asset, index) => {
+                {sortedAssets.map((asset, index) => {
                     const pnlColor = asset.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
                     const bgHover = asset.unrealized_pnl >= 0
                         ? 'hover:bg-emerald-500/5'
                         : 'hover:bg-rose-500/5';
+                    const isClosed = Math.abs(asset.quantity) < 0.00000001;
+                    const closedOpacity = isClosed ? 'opacity-60' : '';
 
                     return (
                         <div
                             key={`${asset.asset_type}-${asset.market || ''}-${asset.symbol}`}
-                            className={`flex px-6 py-4 items-center transition-colors ${bgHover}`}
+                            className={`flex px-6 py-4 items-center transition-colors ${bgHover} ${closedOpacity}`}
                             style={{ animationDelay: `${index * 50}ms` }}
                         >
                             {/* Symbol */}
-                            <div className="w-[180px] flex-shrink-0 flex items-center gap-3">
+                            <div className="flex-1 flex items-center gap-3">
                                 <AssetLogo symbol={asset.symbol} assetType={asset.asset_type} size="md" />
                                 <div>
-                                    <div className="font-semibold text-white">{asset.symbol}</div>
+                                    <div className="font-semibold text-white flex items-center gap-2">
+                                        {asset.symbol}
+                                        {isClosed && (
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-gray-600 text-gray-300 rounded uppercase font-medium">
+                                                {t('ขายแล้ว', 'Closed')}
+                                            </span>
+                                        )}
+                                    </div>
                                     <div className="text-xs text-gray-500">
                                         {getAssetTypeName(asset.asset_type, settings.language)}
                                         {asset.market && <span className="ml-1">• {getMarketName(asset.market, settings.language).split(' ')[0]}</span>}
@@ -93,12 +172,12 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
                             </div>
 
                             {/* Quantity */}
-                            <div className="w-[100px] flex-shrink-0 text-right font-mono text-gray-300">
+                            <div className="flex-1 text-right font-mono text-gray-300">
                                 {formatNumber(asset.quantity, asset.asset_type === 'crypto' ? 8 : 2)}
                             </div>
 
                             {/* Average Cost + Fees */}
-                            <div className="flex-1 min-w-[150px] text-right">
+                            <div className="flex-1 text-right">
                                 <div className="font-mono text-gray-300 whitespace-nowrap">{formatValue(asset.avg_cost)}</div>
                                 {asset.total_fees > 0 && (
                                     <div className="text-xs text-gray-500">
@@ -108,7 +187,7 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
                             </div>
 
                             {/* Current Price */}
-                            <div className="flex-1 min-w-[150px] text-right">
+                            <div className="flex-1 text-right">
                                 <div className="font-mono text-white flex items-center justify-end gap-1 whitespace-nowrap">
                                     {formatValue(asset.current_price)}
                                     <span className={`text-xs ${pnlColor}`}>
@@ -118,13 +197,28 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
                             </div>
 
                             {/* P&L */}
-                            <div className="w-[140px] flex-shrink-0 text-right">
-                                <div className={`font-semibold ${pnlColor}`}>
-                                    {formatValue(asset.unrealized_pnl)}
-                                </div>
-                                <div className={`text-sm ${pnlColor}`}>
-                                    {formatPercent(asset.unrealized_pnl_percent)}
-                                </div>
+                            <div className="flex-1 text-right">
+                                {isClosed ? (
+                                    <>
+                                        {/* Closed position: show realized P&L */}
+                                        <div className={`font-semibold ${asset.realized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            {formatValue(asset.realized_pnl)}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                            {t('กำไรที่รับรู้', 'Realized')}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        {/* Active position: show unrealized P&L */}
+                                        <div className={`font-semibold ${pnlColor}`}>
+                                            {formatValue(asset.unrealized_pnl)}
+                                        </div>
+                                        <div className={`text-sm ${pnlColor}`}>
+                                            {formatPercent(asset.unrealized_pnl_percent)}
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
                     );
@@ -133,3 +227,4 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
         </div>
     );
 }
+

@@ -10,7 +10,7 @@ import { getTransactions, getPortfolio, deleteTransaction, getAssetTypeName, get
 import { Transaction, AssetType, TradeAction, PortfolioResponse } from '@/types';
 
 export default function TransactionsPage() {
-    const { t, settings } = useSettings();
+    const { t, settings, displayCurrency, setDisplayCurrency } = useSettings();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -19,14 +19,13 @@ export default function TransactionsPage() {
     const [error, setError] = useState<string | null>(null);
 
     // Currency state
-    const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('THB');
     const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
     const [isLoadingRates, setIsLoadingRates] = useState(false);
 
     const currencyOptions = [
-        { value: 'THB' as DisplayCurrency, icon: '🇹🇭' },
-        { value: 'USD' as DisplayCurrency, icon: '🇺🇸' },
-        { value: 'BTC' as DisplayCurrency, icon: '₿' },
+        { value: 'THB' as const, icon: '🇹🇭' },
+        { value: 'USD' as const, icon: '🇺🇸' },
+        { value: 'BTC' as const, icon: '₿' },
     ];
 
     // Filter states
@@ -173,7 +172,7 @@ export default function TransactionsPage() {
                 currentPage="transactions"
                 showCurrencySelector={true}
                 currencyValue={displayCurrency}
-                onCurrencyChange={(val) => setDisplayCurrency(val as DisplayCurrency)}
+                onCurrencyChange={(val) => setDisplayCurrency(val as 'THB' | 'USD' | 'BTC')}
                 currencyOptions={currencyOptions}
             />
 

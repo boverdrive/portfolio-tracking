@@ -7,7 +7,7 @@ import { getTransactions, getPortfolio, getAccounts, formatCurrency, formatNumbe
 import { Transaction, PortfolioResponse, Account } from '@/types';
 
 export default function AnalysisPage() {
-    const { t, settings } = useSettings();
+    const { t, settings, displayCurrency, setDisplayCurrency } = useSettings();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -15,14 +15,13 @@ export default function AnalysisPage() {
     const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
 
     // Currency state
-    const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('THB');
     const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
     const [isLoadingRates, setIsLoadingRates] = useState(false);
 
     const currencyOptions = [
-        { value: 'THB' as DisplayCurrency, icon: '🇹🇭' },
-        { value: 'USD' as DisplayCurrency, icon: '🇺🇸' },
-        { value: 'BTC' as DisplayCurrency, icon: '₿' },
+        { value: 'THB' as const, icon: '🇹🇭' },
+        { value: 'USD' as const, icon: '🇺🇸' },
+        { value: 'BTC' as const, icon: '₿' },
     ];
 
     // Load data
@@ -552,7 +551,7 @@ export default function AnalysisPage() {
                 currentPage="analysis"
                 showCurrencySelector={true}
                 currencyValue={displayCurrency}
-                onCurrencyChange={(val) => setDisplayCurrency(val as DisplayCurrency)}
+                onCurrencyChange={(val) => setDisplayCurrency(val as 'THB' | 'USD' | 'BTC')}
                 currencyOptions={currencyOptions}
             />
 

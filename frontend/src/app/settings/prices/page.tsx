@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -17,6 +17,9 @@ interface AssetPrice {
     last_updated?: string;
 }
 
+type SortColumn = 'symbol' | 'asset_type' | 'price' | 'currency' | 'market' | 'last_updated';
+type SortDirection = 'asc' | 'desc';
+
 export default function PricesSettingsPage() {
     const { isAuthenticated, isLoading: authLoading } = useAuth();
     const { t } = useSettings();
@@ -30,6 +33,8 @@ export default function PricesSettingsPage() {
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [showAddForm, setShowAddForm] = useState(false);
+    const [sortColumn, setSortColumn] = useState<SortColumn>('symbol');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [newPrice, setNewPrice] = useState({
         symbol: '',
         asset_type: 'stock',
@@ -161,9 +166,79 @@ export default function PricesSettingsPage() {
         setTimeout(() => setMessage(null), 3000);
     };
 
-    const filteredPrices = prices.filter(p =>
-        p.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.asset_type.toLowerCase().includes(searchQuery.toLowerCase())
+    // Sort toggle handler
+    const handleSort = (column: SortColumn) => {
+        if (sortColumn === column) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+    };
+
+    // Filter and sort prices
+    const sortedPrices = useMemo(() => {
+        const filtered = prices.filter(p =>
+            p.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            p.asset_type.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+
+        return filtered.sort((a, b) => {
+            let aVal: string | number = '';
+            let bVal: string | number = '';
+
+            switch (sortColumn) {
+                case 'symbol':
+                    aVal = a.symbol.toLowerCase();
+                    bVal = b.symbol.toLowerCase();
+                    break;
+                case 'asset_type':
+                    aVal = a.asset_type.toLowerCase();
+                    bVal = b.asset_type.toLowerCase();
+                    break;
+                case 'price':
+                    aVal = a.price;
+                    bVal = b.price;
+                    break;
+                case 'currency':
+                    aVal = a.currency.toLowerCase();
+                    bVal = b.currency.toLowerCase();
+                    break;
+                case 'market':
+                    aVal = (a.market || '').toLowerCase();
+                    bVal = (b.market || '').toLowerCase();
+                    break;
+                case 'last_updated':
+                    aVal = a.last_updated || '';
+                    bVal = b.last_updated || '';
+                    break;
+            }
+
+            if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+            if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }, [prices, searchQuery, sortColumn, sortDirection]);
+
+    // Sortable header component
+    const SortableHeader = ({ column, label, align = 'left' }: { column: SortColumn; label: string; align?: 'left' | 'right' | 'center' }) => (
+        <th
+            className={`px-6 py-4 text-${align} text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:text-white transition-colors select-none`}
+            onClick={() => handleSort(column)}
+        >
+            <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
+                <span>{label}</span>
+                {sortColumn === column && (
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        {sortDirection === 'asc' ? (
+                            <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+                        ) : (
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        )}
+                    </svg>
+                )}
+            </div>
+        </th>
     );
 
     const formatDate = (dateStr?: string) => {
@@ -301,24 +376,24 @@ export default function PricesSettingsPage() {
                     <table className="w-full">
                         <thead className="bg-gray-900/50">
                             <tr>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Symbol</th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">{t('ประเภท', 'Type')}</th>
-                                <th className="px-6 py-4 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">{t('ราคา', 'Price')}</th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">{t('สกุลเงิน', 'Currency')}</th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Market</th>
-                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">{t('อัปเดตล่าสุด', 'Last Updated')}</th>
+                                <SortableHeader column="symbol" label="Symbol" />
+                                <SortableHeader column="asset_type" label={t('ประเภท', 'Type')} />
+                                <SortableHeader column="price" label={t('ราคา', 'Price')} align="right" />
+                                <SortableHeader column="currency" label={t('สกุลเงิน', 'Currency')} />
+                                <SortableHeader column="market" label="Market" />
+                                <SortableHeader column="last_updated" label={t('อัปเดตล่าสุด', 'Last Updated')} />
                                 <th className="px-6 py-4 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">{t('จัดการ', 'Actions')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-700/50">
-                            {filteredPrices.length === 0 ? (
+                            {sortedPrices.length === 0 ? (
                                 <tr>
                                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                                         {prices.length === 0 ? t('ยังไม่มีข้อมูลราคา', 'No price data yet') : t('ไม่พบข้อมูลที่ค้นหา', 'No results found')}
                                     </td>
                                 </tr>
                             ) : (
-                                filteredPrices.map((price) => (
+                                sortedPrices.map((price) => (
                                     <tr key={price.id} className="hover:bg-gray-700/30 transition-colors">
                                         <td className="px-6 py-4">
                                             <span className="font-mono font-semibold text-white">{price.symbol}</span>
@@ -402,7 +477,7 @@ export default function PricesSettingsPage() {
 
                 {/* Summary */}
                 <div className="mt-4 text-sm text-gray-500">
-                    {t('แสดง', 'Showing')} {filteredPrices.length} {t('จาก', 'of')} {prices.length} {t('รายการ', 'items')}
+                    {t('แสดง', 'Showing')} {sortedPrices.length} {t('จาก', 'of')} {prices.length} {t('รายการ', 'items')}
                 </div>
             </main>
         </div>

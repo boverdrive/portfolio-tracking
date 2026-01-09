@@ -2,7 +2,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 use oauth2::{
     AuthorizationCode, AuthUrl, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+    PkceCodeVerifier, RedirectUrl, Scope, TokenUrl,
     basic::BasicClient, reqwest::async_http_client,
 };
 use std::collections::HashMap;
@@ -84,14 +84,22 @@ impl AuthService {
         }
         
         // Create initial admin user if configured
+        tracing::info!("🧐 Checking admin config: Email={:?}, Password present={}", 
+            config.admin_email, 
+            config.admin_password.is_some()
+        );
+
         if let (Some(email), Some(password)) = (&config.admin_email, &config.admin_password) {
             match service.register_local_user(email, password, Some("Admin".to_string()), true).await {
                 Ok(user) => {
                     tracing::info!("Created initial admin user: {} ({}) with role: {}", user.email, user.id, user.role);
                 }
                 Err(e) => {
-                    // User might already exist, that's okay
-                    tracing::debug!("Initial admin user creation: {:?}", e);
+                    // User might already exist, that's okay, but let's log it clearly if it's not a conflict
+                    match &e {
+                        AppError::Conflict(_) => tracing::info!("Admin user already exists locally"),
+                        _ => tracing::error!("❌ Failed to create initial admin user: {:?}", e),
+                    }
                 }
             }
         }
@@ -124,6 +132,8 @@ impl AuthService {
             local_password_hash: Option<String>,
             #[serde(default = "default_user_role")]
             role: String,
+            #[serde(default)]
+            token_version: i32,
         }
         
         fn default_user_role() -> String {
@@ -156,6 +166,7 @@ impl AuthService {
                                 local_password_hash: pb_user.local_password_hash,
                                 created_at: chrono::Utc::now(),
                                 updated_at: chrono::Utc::now(),
+                                token_version: pb_user.token_version,
                             };
                             cache.insert(user.id.clone(), user);
                         }
@@ -193,10 +204,12 @@ impl AuthService {
             avatar_url: Option<String>,
             role: String,
             local_password_hash: Option<String>,
+            token_version: i32,
             #[serde(skip_serializing_if = "Option::is_none")]
             password: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            passwordConfirm: Option<String>,
+            #[serde(rename = "passwordConfirm")]
+            password_confirm: Option<String>,
         }
         
         let payload = PBUserPayload {
@@ -206,8 +219,9 @@ impl AuthService {
             avatar_url: user_clone.avatar_url.clone(),
             role: user_clone.role.clone(),
             local_password_hash: user_clone.local_password_hash.clone(),
+            token_version: user_clone.token_version,
             password: password.clone(),
-            passwordConfirm: password.clone(),
+            password_confirm: password.clone(),
         };
         
         tokio::spawn(async move {
@@ -245,7 +259,7 @@ impl AuthService {
                         tracing::warn!("⚠️ Failed to sync user: {} - {}", status, body);
                     }
                 }
-                Err(e) => tracing::warn!("⚠️ Could not sync user: {}", e),
+                Err(e) => tracing::error!("❌ Could not sync user to PocketBase: {}", e),
             }
         });
     }
@@ -464,6 +478,7 @@ impl AuthService {
             email: user.email.clone(),
             exp: exp.timestamp() as usize,
             iat: now.timestamp() as usize,
+            token_version: user.token_version,
         };
 
         let token = encode(
@@ -618,6 +633,7 @@ impl AuthService {
                         local_password_hash: None, // We don't have the hash
                         created_at: chrono::Utc::now(),
                         updated_at: chrono::Utc::now(),
+                        token_version: pb_user.token_version,
                     };
                     
                     let mut users = self.users.write().await;
@@ -632,6 +648,77 @@ impl AuthService {
                 return Err(AppError::Unauthorized("Invalid email or password".to_string())); 
             }
         }
+    }
+
+    /// Logout from all devices (invalidates all tokens)
+    pub async fn logout_all_devices(&self, user_id: &str) -> Result<(), AppError> {
+        let mut users = self.users.write().await;
+        
+        let user = users.get_mut(user_id)
+            .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+        
+        // Increment token version to invalidate all existing tokens
+        user.token_version += 1;
+        user.updated_at = chrono::Utc::now();
+        let user_clone = user.clone();
+        
+        // Sync to PocketBase
+        drop(users);
+        self.sync_user_to_pb(&user_clone, None);
+        
+        tracing::info!("Logged out all devices for user {} (version: {})", user_id, user_clone.token_version);
+        Ok(())
+    }
+
+    /// Change password and logout all other sessions
+    pub async fn change_password(&self, user_id: &str, old_password: &str, new_password: &str) -> Result<(), AppError> {
+        let mut users = self.users.write().await;
+        
+        let user = users.get_mut(user_id)
+            .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+        
+        // Verify old password (locally or via PB) 
+        // Note: For simplicity and security, we require local verification here if possible
+        // Ideally we should reuse verify_local_user logic but focused on ID not email
+        
+        let is_valid = if let Some(hash) = &user.local_password_hash {
+            bcrypt::verify(old_password, hash).unwrap_or(false)
+        } else {
+            // Fallback: This is tricky because we need to verify against PB
+            // But verify_with_pocketbase uses email. 
+            // We can assume if they are calling this API they are already authenticated via JWT
+            // So we mostly need to verify they know the current password before changing it.
+            // Let's defer to PB verification using their email.
+            let user_email = user.email.clone();
+            drop(users); // Release lock before async call
+            let verify_result = self.verify_with_pocketbase(&user_email, old_password).await;
+            users = self.users.write().await; // Re-acquire lock
+            verify_result.is_ok()
+        };
+
+        if !is_valid {
+             return Err(AppError::Unauthorized("Invalid old password".to_string()));
+        }
+
+        // Re-get user reference as lock was dropped
+        let user = users.get_mut(user_id)
+            .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+        // Hash new password
+        let password_hash = bcrypt::hash(new_password, bcrypt::DEFAULT_COST)
+            .map_err(|e| AppError::Internal(format!("Failed to hash password: {}", e)))?;
+        
+        user.local_password_hash = Some(password_hash);
+        user.token_version += 1; // Invalidate all tokens (including current one will need refresh)
+        user.updated_at = chrono::Utc::now();
+        let user_clone = user.clone();
+        
+        // Sync to PocketBase
+        drop(users);
+        self.sync_user_to_pb(&user_clone, Some(new_password.to_string()));
+        
+        tracing::info!("Password changed for user {}", user_id);
+        Ok(())
     }
 
     /// Verify user against PocketBase API directly
@@ -657,6 +744,8 @@ impl AuthService {
             avatar: Option<String>, 
             #[serde(default = "default_user_role")]
             role: String,
+            #[serde(default)]
+            token_version: i32,
             // PB might use 'avatar' field name in record, mapped to avatar_url in our model
         }
         
@@ -688,6 +777,7 @@ impl AuthService {
                 local_password_hash: None,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
+                token_version: data.record.token_version,
             })
         } else {
             let status = resp.status();
@@ -716,21 +806,26 @@ impl AuthService {
     pub async fn link_oauth_account(&self, account: OAuthAccount) -> Result<(), AppError> {
         let mut accounts = self.oauth_accounts.write().await;
         
-        // Check if this OAuth account is already linked to another user
-        let existing = accounts.values().find(|a| 
-            a.provider == account.provider && a.provider_user_id == account.provider_user_id
-        );
+        // Check if this OAuth account is already linked
+        let existing_id = accounts.iter()
+            .find(|(_, a)| a.provider == account.provider && a.provider_user_id == account.provider_user_id)
+            .map(|(id, a)| (id.clone(), a.user_id.clone()));
         
-        if let Some(existing) = existing {
-            if existing.user_id != account.user_id {
+        if let Some((existing_id, existing_user_id)) = existing_id {
+            if existing_user_id != account.user_id {
                 return Err(AppError::Conflict(
                     "This OAuth account is already linked to another user".to_string()
                 ));
             }
-            // Already linked to this user, update tokens
+            // Already linked to this user - update tokens by using the SAME existing ID
+            let mut updated_account = account;
+            updated_account.id = existing_id.clone();
+            accounts.insert(existing_id, updated_account);
+        } else {
+            // New account - insert with new ID
+            accounts.insert(account.id.clone(), account);
         }
-
-        accounts.insert(account.id.clone(), account);
+        
         Ok(())
     }
 

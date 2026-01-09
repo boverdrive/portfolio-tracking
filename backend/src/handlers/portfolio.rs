@@ -15,6 +15,12 @@ pub struct PortfolioResponse {
     pub assets: Vec<PortfolioAsset>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct PortfolioQuery {
+    #[serde(default)]
+    pub include_closed: bool,
+}
+
 /// Extract user_id from Authorization header JWT
 fn extract_user_id(state: &AppState, headers: &HeaderMap) -> Result<String, AppError> {
     let auth_header = headers
@@ -34,15 +40,20 @@ fn extract_user_id(state: &AppState, headers: &HeaderMap) -> Result<String, AppE
 pub async fn get_portfolio(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<PortfolioQuery>,
 ) -> Result<Json<PortfolioResponse>, AppError> {
     let user_id = extract_user_id(&state, &headers)?;
     let transactions = state.db.list_transactions(&user_id).await?;
+    
+    // Sort transactions by timestamp ascending (oldest first) for correct P&L calculation
+    let mut sorted_transactions = transactions.clone();
+    sorted_transactions.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     
     // Group transactions by symbol+type+market and calculate holdings
     let mut holdings: HashMap<String, PortfolioAsset> = HashMap::new();
     let mut realized_pnl = 0.0;
     
-    for tx in &transactions {
+    for tx in &sorted_transactions {
         let market_key = tx.market.as_ref().map(|m| m.to_string()).unwrap_or_default();
         let key = format!("{}:{}:{}", tx.asset_type, market_key, tx.symbol);
         
@@ -111,7 +122,9 @@ pub async fn get_portfolio(
                 if asset.quantity > 0.0 {
                     let sell_value = tx.quantity * tx.price - tx.fees;
                     let cost_basis = tx.quantity * asset.avg_cost;
-                    realized_pnl += sell_value - cost_basis;
+                    let pnl = sell_value - cost_basis;
+                    realized_pnl += pnl;
+                    asset.realized_pnl += pnl;  // Accumulate per-asset realized P&L
                     
                     // Reduce quantity and proportionally reduce fees
                     let ratio = tx.quantity / asset.quantity;
@@ -126,7 +139,9 @@ pub async fn get_portfolio(
                 if asset.quantity < 0.0 {
                     let buy_cost = tx.quantity * tx.price + tx.fees;
                     let short_value = tx.quantity * asset.avg_cost;  // What we sold for
-                    realized_pnl += short_value - buy_cost;  // Profit if buy_cost < short_value
+                    let pnl = short_value - buy_cost;  // Profit if buy_cost < short_value
+                    realized_pnl += pnl;
+                    asset.realized_pnl += pnl;  // Accumulate per-asset realized P&L
                     
                     // Reduce negative quantity (towards 0)
                     let ratio = tx.quantity / asset.quantity.abs();
@@ -139,12 +154,16 @@ pub async fn get_portfolio(
         }
     }
     
-    // Filter out zero holdings and fetch current prices
+    // Filter out zero holdings unless include_closed is true
     // Use abs() to include both long (positive) and short (negative) positions
-    let mut active_holdings: Vec<PortfolioAsset> = holdings
-        .into_values()
-        .filter(|a| a.quantity.abs() > 0.00000001) // Support both long and short positions
-        .collect();
+    let mut active_holdings: Vec<PortfolioAsset> = if query.include_closed {
+        holdings.into_values().collect()
+    } else {
+        holdings
+            .into_values()
+            .filter(|a| a.quantity.abs() > 0.00000001) // Support both long and short positions
+            .collect()
+    };
     
     // Fetch current prices for all holdings
     // Fetch current prices for all holdings
@@ -278,7 +297,7 @@ pub async fn get_portfolio_summary(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<PortfolioSummary>, AppError> {
-    let portfolio = get_portfolio(State(state), headers).await?;
+    let portfolio = get_portfolio(State(state), headers, axum::extract::Query(PortfolioQuery { include_closed: false })).await?;
     Ok(Json(portfolio.summary.clone()))
 }
 
@@ -290,7 +309,7 @@ pub async fn get_portfolio_by_type(
 ) -> Result<Json<PortfolioResponse>, AppError> {
     let asset_type_enum = parse_asset_type(&asset_type)?;
     
-    let portfolio = get_portfolio(State(state), headers).await?;
+    let portfolio = get_portfolio(State(state), headers, axum::extract::Query(PortfolioQuery { include_closed: false })).await?;
     
     let filtered_assets: Vec<PortfolioAsset> = portfolio.assets
         .iter()
@@ -323,7 +342,7 @@ pub async fn get_portfolio_by_market(
 ) -> Result<Json<PortfolioResponse>, AppError> {
     let market_enum = parse_market(&market)?;
     
-    let portfolio = get_portfolio(State(state), headers).await?;
+    let portfolio = get_portfolio(State(state), headers, axum::extract::Query(PortfolioQuery { include_closed: false })).await?;
     
     let filtered_assets: Vec<PortfolioAsset> = portfolio.assets
         .iter()

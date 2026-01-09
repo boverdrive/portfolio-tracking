@@ -1,0 +1,145 @@
+[
+    {
+        "id": "pbc_api_rate_limits",
+        "listRule": "",
+        "viewRule": "",
+        "createRule": "",
+        "updateRule": "",
+        "deleteRule": "",
+        "name": "api_rate_limits",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_api_name_001",
+                "max": 50,
+                "min": 1,
+                "name": "api_name",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "number_rpm_002",
+                "max": null,
+                "min": 0,
+                "name": "requests_per_minute",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_rpd_003",
+                "max": null,
+                "min": 0,
+                "name": "requests_per_day",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_cmc_004",
+                "max": null,
+                "min": 0,
+                "name": "current_minute_count",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_cdc_005",
+                "max": null,
+                "min": 0,
+                "name": "current_day_count",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "date_mra_006",
+                "max": "",
+                "min": "",
+                "name": "minute_reset_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date_dra_007",
+                "max": "",
+                "min": "",
+                "name": "day_reset_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date_lra_008",
+                "max": "",
+                "min": "",
+                "name": "last_request_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "bool_ib_009",
+                "name": "is_blocked",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
+            },
+            {
+                "hidden": false,
+                "id": "date_bu_010",
+                "max": "",
+                "min": "",
+                "name": "blocked_until",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            }
+        ],
+        "indexes": [],
+        "system": false
+    }
+]

@@ -7,6 +7,8 @@ pub mod accounts;
 pub mod symbols;
 pub mod job;
 pub mod users;
+pub mod snapshot;
+pub mod rate_limit;
 
 pub use transactions::*;
 pub use portfolio::*;
@@ -17,3 +19,5 @@ pub use accounts::*;
 pub use symbols::*;
 pub use job::*;
 pub use users::*;
+pub use snapshot::*;
+pub use rate_limit::*;

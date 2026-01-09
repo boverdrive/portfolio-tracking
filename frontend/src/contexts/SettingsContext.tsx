@@ -57,6 +57,9 @@ export interface AppSettings {
     defaultCurrency: string;
     defaultAssetType: string;
 
+    // Display currency (for converting values in UI)
+    displayCurrency: 'THB' | 'USD' | 'BTC';
+
     // Master data
     languages: LanguageConfig[];
     assetTypes: AssetTypeConfig[];
@@ -116,6 +119,7 @@ const defaultSettings: AppSettings = {
     theme: 'dark',
     defaultCurrency: 'THB',
     defaultAssetType: 'stock',
+    displayCurrency: 'THB',
     languages: defaultLanguages,
     assetTypes: defaultAssetTypes,
     markets: defaultMarkets,
@@ -131,6 +135,8 @@ interface SettingsContextType {
     resetSettings: () => void;
     t: (thText: string, enText: string) => string;
     currentLanguage: LanguageConfig | undefined;
+    displayCurrency: 'THB' | 'USD' | 'BTC';
+    setDisplayCurrency: (currency: 'THB' | 'USD' | 'BTC') => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -193,12 +199,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         return settings.language === 'th' ? thText : enText;
     };
 
+    // Display currency helpers
+    const displayCurrency = settings.displayCurrency;
+    const setDisplayCurrency = (currency: 'THB' | 'USD' | 'BTC') => {
+        updateSettings({ displayCurrency: currency });
+    };
+
     if (!isLoaded) {
         return null;
     }
 
     return (
-        <SettingsContext.Provider value={{ settings, updateSettings, resetSettings, t, currentLanguage }}>
+        <SettingsContext.Provider value={{ settings, updateSettings, resetSettings, t, currentLanguage, displayCurrency, setDisplayCurrency }}>
             {children}
         </SettingsContext.Provider>
     );
