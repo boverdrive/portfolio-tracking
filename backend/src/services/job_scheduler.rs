@@ -6,12 +6,14 @@ use reqwest::Client;
 
 use crate::config::Config;
 use crate::models::{JobConfig, JobStatus, ApiStatusResult, ApiStatusCheckResult};
+use crate::services::PocketBaseClient;
 
 /// Job scheduler service for background tasks
 #[derive(Clone)]
 pub struct JobScheduler {
     config: Config,
     http_client: Client,
+    pb_client: PocketBaseClient,
     // In-memory job registry (synced with PocketBase)
     jobs: Arc<RwLock<HashMap<String, JobConfig>>>,
     // PocketBase URL for job storage
@@ -19,11 +21,12 @@ pub struct JobScheduler {
 }
 
 impl JobScheduler {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, pb_client: PocketBaseClient) -> Self {
         let pocketbase_url = config.pocketbase_url.clone();
         Self {
             config,
             http_client: Client::new(),
+            pb_client,
             jobs: Arc::new(RwLock::new(HashMap::new())),
             pocketbase_url,
         }
@@ -83,8 +86,12 @@ impl JobScheduler {
 
     /// Load jobs from PocketBase
     async fn load_jobs_from_db(&self) -> Result<Vec<JobConfig>, Box<dyn std::error::Error + Send + Sync>> {
+        let token = self.pb_client.get_token().await;
         let url = format!("{}/api/collections/jobs/records", self.pocketbase_url);
-        let response = self.http_client.get(&url).send().await?;
+        
+        let req = self.http_client.get(&url);
+        let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+        let response = req.send().await?;
         
         if !response.status().is_success() {
             return Err(format!("Failed to load jobs: {}", response.status()).into());
@@ -101,6 +108,7 @@ impl JobScheduler {
 
     /// Create a job in PocketBase
     async fn create_job_in_db(&self, job: &JobConfig) -> Result<JobConfig, Box<dyn std::error::Error + Send + Sync>> {
+        let token = self.pb_client.get_token().await;
         let url = format!("{}/api/collections/jobs/records", self.pocketbase_url);
         
         // Don't send 'id' field - let PocketBase auto-generate it
@@ -116,10 +124,9 @@ impl JobScheduler {
             "last_result": job.last_result
         });
         
-        let response = self.http_client.post(&url)
-            .json(&payload)
-            .send()
-            .await?;
+        let req = self.http_client.post(&url);
+        let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+        let response = req.json(&payload).send().await?;
         
         if !response.status().is_success() {
             let status = response.status();
@@ -133,11 +140,12 @@ impl JobScheduler {
 
     /// Update a job in PocketBase
     async fn update_job_in_db(&self, job: &JobConfig) -> Result<JobConfig, Box<dyn std::error::Error + Send + Sync>> {
+        let token = self.pb_client.get_token().await;
         let url = format!("{}/api/collections/jobs/records/{}", self.pocketbase_url, job.id);
-        let response = self.http_client.patch(&url)
-            .json(job)
-            .send()
-            .await?;
+        
+        let req = self.http_client.patch(&url);
+        let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+        let response = req.json(job).send().await?;
         
         if !response.status().is_success() {
             return Err(format!("Failed to update job: {}", response.status()).into());
@@ -342,6 +350,8 @@ impl JobScheduler {
     async fn run_price_fetch_job(&self) -> Result<serde_json::Value, String> {
         tracing::info!("💰 Running price fetch job...");
         
+        let token = self.pb_client.get_token().await;
+        
         // Step 1: Get unique symbols from transactions
         let transactions_url = format!("{}/api/collections/transactions/records?perPage=500", self.pocketbase_url);
         
@@ -358,7 +368,10 @@ impl JobScheduler {
             items: Vec<Transaction>,
         }
         
-        let transactions: Vec<Transaction> = match self.http_client.get(&transactions_url).send().await {
+        let req = self.http_client.get(&transactions_url);
+        let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+        
+        let transactions: Vec<Transaction> = match req.send().await {
             Ok(resp) if resp.status().is_success() => {
                 resp.json::<TransactionsResponse>().await
                     .map(|r| r.items)
@@ -414,7 +427,9 @@ impl JobScheduler {
                                 urlencoding::encode(&filter)
                             );
                             
-                            let existing = self.http_client.get(&check_url).send().await;
+                            let req = self.http_client.get(&check_url);
+                            let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                            let existing = req.send().await;
                             
                             let payload = serde_json::json!({
                                 "symbol": symbol,
@@ -435,31 +450,43 @@ impl JobScheduler {
                                                     "{}/api/collections/asset_prices/records/{}",
                                                     self.pocketbase_url, id
                                                 );
-                                                self.http_client.patch(&update_url).json(&payload).send().await
+                                                let req = self.http_client.patch(&update_url);
+                                                let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                                                req.json(&payload).send().await
                                             } else {
                                                 // Create new
                                                 let create_url = format!("{}/api/collections/asset_prices/records", self.pocketbase_url);
-                                                self.http_client.post(&create_url).json(&payload).send().await
+                                                let req = self.http_client.post(&create_url);
+                                                let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                                                req.json(&payload).send().await
                                             }
                                         } else {
                                             // Create new
                                             let create_url = format!("{}/api/collections/asset_prices/records", self.pocketbase_url);
-                                            self.http_client.post(&create_url).json(&payload).send().await
+                                            let req = self.http_client.post(&create_url);
+                                            let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                                            req.json(&payload).send().await
                                         }
                                     } else {
                                         // Create new
                                         let create_url = format!("{}/api/collections/asset_prices/records", self.pocketbase_url);
-                                        self.http_client.post(&create_url).json(&payload).send().await
+                                        let req = self.http_client.post(&create_url);
+                                        let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                                        req.json(&payload).send().await
                                     }
                                 } else {
                                     // Create new
                                     let create_url = format!("{}/api/collections/asset_prices/records", self.pocketbase_url);
-                                    self.http_client.post(&create_url).json(&payload).send().await
+                                    let req = self.http_client.post(&create_url);
+                                    let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                                    req.json(&payload).send().await
                                 }
                             } else {
                                 // Create new
                                 let create_url = format!("{}/api/collections/asset_prices/records", self.pocketbase_url);
-                                self.http_client.post(&create_url).json(&payload).send().await
+                                let req = self.http_client.post(&create_url);
+                                let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                                req.json(&payload).send().await
                             };
                             
                             if save_result.is_ok() {

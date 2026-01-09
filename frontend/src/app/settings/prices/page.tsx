@@ -25,6 +25,7 @@ export default function PricesSettingsPage() {
     const [loading, setLoading] = useState(true);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editPrice, setEditPrice] = useState('');
+    const [editMarket, setEditMarket] = useState('');
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
@@ -66,6 +67,7 @@ export default function PricesSettingsPage() {
     const handleEdit = (price: AssetPrice) => {
         setEditingId(price.id);
         setEditPrice(price.price.toString());
+        setEditMarket(price.market || '');
     };
 
     const handleSave = async (price: AssetPrice) => {
@@ -82,6 +84,7 @@ export default function PricesSettingsPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     price: newPriceValue,
+                    market: editMarket || null,
                     last_updated: new Date().toISOString()
                 })
             });
@@ -228,7 +231,7 @@ export default function PricesSettingsPage() {
                 {showAddForm && (
                     <div className="mb-6 p-6 bg-gray-800/50 backdrop-blur-sm rounded-xl border border-gray-700">
                         <h3 className="text-lg font-semibold text-white mb-4">{t('เพิ่มราคาใหม่', 'Add New Price')}</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                             <input
                                 type="text"
                                 placeholder="Symbol"
@@ -261,8 +264,16 @@ export default function PricesSettingsPage() {
                             >
                                 <option value="THB">THB</option>
                                 <option value="USD">USD</option>
+                                <option value="USDT">USDT</option>
                                 <option value="BTC">BTC</option>
                             </select>
+                            <input
+                                type="text"
+                                placeholder={t('Market (เช่น Binance)', 'Market (e.g., Binance)')}
+                                value={newPrice.market}
+                                onChange={(e) => setNewPrice({ ...newPrice, market: e.target.value })}
+                                className="px-4 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                            />
                             <button
                                 onClick={handleAddPrice}
                                 disabled={saving}
@@ -294,6 +305,7 @@ export default function PricesSettingsPage() {
                                 <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">{t('ประเภท', 'Type')}</th>
                                 <th className="px-6 py-4 text-right text-xs font-medium text-gray-400 uppercase tracking-wider">{t('ราคา', 'Price')}</th>
                                 <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">{t('สกุลเงิน', 'Currency')}</th>
+                                <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Market</th>
                                 <th className="px-6 py-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">{t('อัปเดตล่าสุด', 'Last Updated')}</th>
                                 <th className="px-6 py-4 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">{t('จัดการ', 'Actions')}</th>
                             </tr>
@@ -301,7 +313,7 @@ export default function PricesSettingsPage() {
                         <tbody className="divide-y divide-gray-700/50">
                             {filteredPrices.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                                         {prices.length === 0 ? t('ยังไม่มีข้อมูลราคา', 'No price data yet') : t('ไม่พบข้อมูลที่ค้นหา', 'No results found')}
                                     </td>
                                 </tr>
@@ -327,6 +339,19 @@ export default function PricesSettingsPage() {
                                             )}
                                         </td>
                                         <td className="px-6 py-4 text-sm text-gray-400">{price.currency}</td>
+                                        <td className="px-6 py-4 text-sm">
+                                            {editingId === price.id ? (
+                                                <input
+                                                    type="text"
+                                                    value={editMarket}
+                                                    onChange={(e) => setEditMarket(e.target.value)}
+                                                    placeholder="Market"
+                                                    className="w-28 px-2 py-1 bg-gray-700 border border-emerald-500 rounded text-white text-sm focus:outline-none"
+                                                />
+                                            ) : (
+                                                <span className="text-gray-500">{price.market || '-'}</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 text-sm text-gray-500">{formatDate(price.last_updated)}</td>
                                         <td className="px-6 py-4 text-center">
                                             {editingId === price.id ? (

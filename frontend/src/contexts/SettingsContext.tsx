@@ -104,6 +104,11 @@ const defaultCurrencies: CurrencyConfig[] = [
     { code: 'BTC', name: 'บิทคอยน์', symbol: '₿', enabled: true },
     { code: 'EUR', name: 'ยูโร', symbol: '€', enabled: true },
     { code: 'GBP', name: 'ปอนด์', symbol: '£', enabled: true },
+    { code: 'JPY', name: 'เยน', symbol: '¥', enabled: true },
+    { code: 'HKD', name: 'ฮ่องกง', symbol: 'HK$', enabled: true },
+    { code: 'SGD', name: 'สิงคโปร์', symbol: 'S$', enabled: true },
+    { code: 'USDT', name: 'Tether', symbol: '₮', enabled: true },
+    { code: 'USDC', name: 'USD Coin', symbol: 'Ⓢ', enabled: true },
 ];
 
 const defaultSettings: AppSettings = {

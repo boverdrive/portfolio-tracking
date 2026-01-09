@@ -164,12 +164,18 @@ pub async fn get_portfolio(
         };
         
         let market_filter = if let Some(m) = &asset.market {
-            // Convert to lowercase to match PocketBase storage format
-            format!(" && market='{}'", m.to_string().to_lowercase())
+            // Use case-insensitive matching (~) since PocketBase may store different cases
+            format!(" && market~'{}'", m.to_string().to_lowercase())
         } else {
             String::new()
         };
         let filter = format!("symbol='{}' && asset_type='{}'{}", asset.symbol, asset_type_str, market_filter);
+        
+        // Debug: log filter for XAG
+        if asset.symbol == "XAG" {
+            tracing::info!("XAG PocketBase filter: {}", filter);
+        }
+        
         let check_url = format!(
             "{}/api/collections/asset_prices/records?filter={}",
             pb_url,

@@ -19,6 +19,22 @@ pub struct PocketBaseClient {
     // Track if initial load is done
     loaded_transactions: Arc<RwLock<bool>>,
     loaded_accounts: Arc<RwLock<bool>>,
+    // Admin token
+    token: Arc<RwLock<Option<String>>>,
+    config: Config,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminAuthResponse {
+    token: String,
+    #[allow(dead_code)]
+    admin: Option<AdminData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminData {
+    id: String,
+    email: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,12 +52,74 @@ struct PBListResponse<T> {
 impl PocketBaseClient {
     pub fn new(config: Config) -> Self {
         Self {
-            pocketbase_url: config.pocketbase_url,
+            pocketbase_url: config.pocketbase_url.clone(),
             client: reqwest::Client::new(),
             transactions: Arc::new(RwLock::new(HashMap::new())),
             accounts: Arc::new(RwLock::new(HashMap::new())),
             loaded_transactions: Arc::new(RwLock::new(false)),
             loaded_accounts: Arc::new(RwLock::new(false)),
+            token: Arc::new(RwLock::new(None)),
+            config,
+        }
+    }
+
+    /// Authenticate as Admin to PocketBase
+    async fn authenticate(&self) -> Result<String, AppError> {
+        let email = self.config.admin_email.as_deref().unwrap_or("");
+        let password = self.config.admin_password.as_deref().unwrap_or("");
+
+        if email.is_empty() {
+             tracing::warn!("⚠️ POCKETBASE_ADMIN_EMAIL not set. Skipping admin authentication.");
+             return Ok("".to_string());
+        }
+
+        let url = format!("{}/api/collections/_superusers/auth-with-password", self.pocketbase_url);
+
+        let body = serde_json::json!({
+            "identity": email,
+            "password": password,
+        });
+
+        match self.client.post(&url).json(&body).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    let data = resp.json::<AdminAuthResponse>().await
+                        .map_err(|e| AppError::Internal(format!("Failed to parse admin auth response: {}", e)))?;
+                    
+                    tracing::info!("🔐 Authenticated as Admin to PocketBase");
+                    
+                    let mut token_lock = self.token.write().await;
+                    *token_lock = Some(data.token.clone());
+                    
+                    Ok(data.token)
+                } else {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    tracing::error!("❌ Failed to authenticate as Admin: {} - {}", status, body);
+                    Err(AppError::Unauthorized("Failed to authenticate as Admin".to_string()))
+                }
+            }
+            Err(e) => {
+                tracing::error!("❌ Could not connect to PocketBase for auth: {}", e);
+                Err(AppError::Internal(format!("PocketBase auth connection error: {}", e)))
+            }
+        }
+    }
+
+    /// Get valid admin token (authenticates if needed)
+    pub async fn get_token(&self) -> String {
+        // optimistically read
+        {
+            let token = self.token.read().await;
+            if let Some(t) = &*token {
+                return t.clone();
+            }
+        }
+        
+        // if no token, authenticate
+        match self.authenticate().await {
+            Ok(t) => t,
+            Err(_) => "".to_string(), // Return empty string if auth fails (fallback to public/guest)
         }
     }
 
@@ -54,9 +132,17 @@ impl PocketBaseClient {
             return Ok(());
         }
 
+        let token = self.get_token().await;
         let url = format!("{}/api/collections/transactions/records?perPage=500", self.pocketbase_url);
         
-        match self.client.get(&url).send().await {
+        let request = self.client.get(&url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        match request.send().await {
             Ok(response) => {
                 if response.status().is_success() {
                     let body_text = response.text().await.unwrap_or_default();
@@ -111,9 +197,19 @@ impl PocketBaseClient {
         let tx_clone = transaction.clone();
         let client = self.client.clone();
         
+        // Need to get token before spawning if we want to use it, 
+        // OR spawn a task that gets the token. 
+        // Since get_token is async and needs self, better to get it here or clone self.
+        let me = self.clone();
+        
         tokio::spawn(async move {
+            let token = me.get_token().await;
             tracing::info!("🔄 Syncing transaction to PocketBase: {}", tx_clone.id);
-            match client.post(&url).json(&tx_clone).send().await {
+            
+            let req = client.post(&url);
+            let req = if !token.is_empty() { req.header("Authorization", token) } else { req };
+            
+            match req.json(&tx_clone).send().await {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {
@@ -222,9 +318,15 @@ impl PocketBaseClient {
         let url = format!("{}/api/collections/transactions/records/{}", self.pocketbase_url, id);
         let tx_clone = updated.clone();
         let client = self.client.clone();
+        let me = self.clone();
         
         tokio::spawn(async move {
-            match client.patch(&url).json(&tx_clone).send().await {
+            let token = me.get_token().await;
+            
+            let req = client.patch(&url);
+            let req = if !token.is_empty() { req.header("Authorization", token) } else { req };
+            
+            match req.json(&tx_clone).send().await {
                 Ok(resp) => {
                     if !resp.status().is_success() {
                         tracing::warn!("⚠️ Failed to sync transaction update: {}", resp.status());
@@ -249,9 +351,15 @@ impl PocketBaseClient {
         // Sync to PocketBase
         let url = format!("{}/api/collections/transactions/records/{}", self.pocketbase_url, id);
         let client = self.client.clone();
+        let me = self.clone();
         
         tokio::spawn(async move {
-            match client.delete(&url).send().await {
+            let token = me.get_token().await;
+            
+            let req = client.delete(&url);
+            let req = if !token.is_empty() { req.header("Authorization", token) } else { req };
+            
+            match req.send().await {
                 Ok(resp) => {
                     if !resp.status().is_success() {
                         tracing::warn!("⚠️ Failed to sync transaction delete: {}", resp.status());
@@ -310,9 +418,17 @@ impl PocketBaseClient {
             return Ok(());
         }
 
+        let token = self.get_token().await;
         let url = format!("{}/api/collections/accounts/records?perPage=500", self.pocketbase_url);
         
-        match self.client.get(&url).send().await {
+        let request = self.client.get(&url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        match request.send().await {
             Ok(response) => {
                 if response.status().is_success() {
                     if let Ok(data) = response.json::<PBListResponse<Account>>().await {
@@ -353,10 +469,16 @@ impl PocketBaseClient {
         let url = format!("{}/api/collections/accounts/records", self.pocketbase_url);
         let acc_clone = account.clone();
         let client = self.client.clone();
+        let me = self.clone();
         
         tokio::spawn(async move {
+            let token = me.get_token().await;
             tracing::info!("🔄 Syncing account to PocketBase: {}", acc_clone.id);
-            match client.post(&url).json(&acc_clone).send().await {
+            
+            let req = client.post(&url);
+            let req = if !token.is_empty() { req.header("Authorization", token) } else { req };
+            
+            match req.json(&acc_clone).send().await {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {
@@ -443,9 +565,15 @@ impl PocketBaseClient {
         let url = format!("{}/api/collections/accounts/records/{}", self.pocketbase_url, id);
         let acc_clone = updated.clone();
         let client = self.client.clone();
+        let me = self.clone();
         
         tokio::spawn(async move {
-            match client.patch(&url).json(&acc_clone).send().await {
+            let token = me.get_token().await;
+            
+            let req = client.patch(&url);
+            let req = if !token.is_empty() { req.header("Authorization", token) } else { req };
+            
+            match req.json(&acc_clone).send().await {
                 Ok(resp) => {
                     if !resp.status().is_success() {
                         tracing::warn!("⚠️ Failed to sync account update: {}", resp.status());
@@ -470,9 +598,15 @@ impl PocketBaseClient {
         // Sync to PocketBase
         let url = format!("{}/api/collections/accounts/records/{}", self.pocketbase_url, id);
         let client = self.client.clone();
+        let me = self.clone();
         
         tokio::spawn(async move {
-            match client.delete(&url).send().await {
+            let token = me.get_token().await;
+            
+            let req = client.delete(&url);
+            let req = if !token.is_empty() { req.header("Authorization", token) } else { req };
+            
+            match req.send().await {
                 Ok(resp) => {
                     if !resp.status().is_success() {
                         tracing::warn!("⚠️ Failed to sync account delete: {}", resp.status());

@@ -153,6 +153,7 @@ fn get_thai_stock_list() -> Vec<StockSymbol> {
         // Insurance
         stock("BLA", "Bangkok Life Assurance", "SET"),
         stock("TLI", "Thai Life Insurance", "SET"),
+        stock("TIPH", "Dhipaya Group Holdings", "SET"),
         
         // Media & Entertainment
         stock("MAJOR", "Major Cineplex Group", "SET"),
@@ -414,6 +415,8 @@ fn get_crypto_list() -> Vec<CryptoSymbol> {
         CryptoSymbol { symbol: "FLOKI".to_string(), name: "Floki".to_string(), category: "Meme".to_string() },
         CryptoSymbol { symbol: "WIF".to_string(), name: "dogwifhat".to_string(), category: "Meme".to_string() },
         CryptoSymbol { symbol: "BONK".to_string(), name: "Bonk".to_string(), category: "Meme".to_string() },
+        CryptoSymbol { symbol: "XAG".to_string(), name: "Silver".to_string(), category: "Commodity".to_string() },
+        CryptoSymbol { symbol: "XAU".to_string(), name: "Gold".to_string(), category: "Commodity".to_string() },
         // Stablecoins
         CryptoSymbol { symbol: "USDT".to_string(), name: "Tether".to_string(), category: "Stablecoin".to_string() },
         CryptoSymbol { symbol: "USDC".to_string(), name: "USD Coin".to_string(), category: "Stablecoin".to_string() },

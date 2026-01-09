@@ -597,6 +597,75 @@ function CurrencySettings() {
     );
 }
 
+function SystemSettings() {
+    const { t } = useSettings();
+    const [seeding, setSeeding] = useState(false);
+    const [seedResult, setSeedResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+    const handleSeed = async () => {
+        if (!confirm(t('การ Seed จะทำการเพิ่มข้อมูล Symbol ตั้งต้นลงในฐานข้อมูล ยืนยัน?', 'Seed default symbols to database?'))) {
+            return;
+        }
+
+        setSeeding(true);
+        setSeedResult(null);
+        try {
+            // Import dynamically or use the one from api.ts if available in context
+            const { seedSymbols } = await import('@/lib/api');
+            const result = await seedSymbols();
+            setSeedResult({ type: 'success', message: result.message });
+        } catch (err) {
+            setSeedResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed to seed symbols' });
+        } finally {
+            setSeeding(false);
+        }
+    };
+
+    return (
+        <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                🔧 {t('ระบบ', 'System')}
+            </h3>
+
+            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
+                <div className="flex items-center justify-between mb-2">
+                    <div>
+                        <h4 className="text-white font-medium">{t('Seed Symbols', 'Seed Symbols')}</h4>
+                        <p className="text-sm text-gray-400">
+                            {t('เพิ่มข้อมูลหุ้น/เหรียญตั้งต้น (Thai Stock, Crypto, TFEX, Foreign Stock) ลง Database', 'Populate database with default symbols')}
+                        </p>
+                    </div>
+                    <button
+                        onClick={handleSeed}
+                        disabled={seeding}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 rounded-lg text-white text-sm transition-all flex items-center gap-2"
+                    >
+                        {seeding ? (
+                            <>
+                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Seeding...
+                            </>
+                        ) : (
+                            <>
+                                📂 Seed DB
+                            </>
+                        )}
+                    </button>
+                </div>
+
+                {seedResult && (
+                    <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${seedResult.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        {seedResult.message}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function ResetSettings() {
     const { resetSettings, t } = useSettings();
 
@@ -847,6 +916,8 @@ export default function SettingsPage() {
                             <MarketSettings />
                             <hr className="border-gray-700" />
                             <CurrencySettings />
+                            <hr className="border-gray-700" />
+                            <SystemSettings />
                         </>
                     )}
                 </div>

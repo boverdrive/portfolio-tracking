@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Header from '@/components/Header';
 import { useSettings } from '@/contexts/SettingsContext';
 import { getTransactions, getPortfolio, getAccounts, formatCurrency, formatNumber, getAssetTypeName, DisplayCurrency, getAllExchangeRates } from '@/lib/api';
@@ -12,6 +12,7 @@ export default function AnalysisPage() {
     const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
 
     // Currency state
     const [displayCurrency, setDisplayCurrency] = useState<DisplayCurrency>('THB');
@@ -255,18 +256,42 @@ export default function AnalysisPage() {
                 };
             }
 
-            // Separate spot and futures
-            const spotTxs = accountTxs.filter(tx => tx.asset_type !== 'tfex');
-            const futuresTxs = accountTxs.filter(tx => tx.asset_type === 'tfex');
+            // Separate spot and futures based on action type
+            const isFuturesAction = (action: string) => ['long', 'short', 'close_long', 'close_short'].includes(action.toLowerCase());
+            const spotTxs = accountTxs.filter(tx => !isFuturesAction(tx.action));
+            const futuresTxs = accountTxs.filter(tx => isFuturesAction(tx.action));
+
+            // Debug: log XAG transactions
+            const xagTxs = accountTxs.filter(tx => tx.symbol === 'XAG');
+            if (xagTxs.length > 0) {
+                console.log('XAG transactions found:', xagTxs.map(tx => ({
+                    action: tx.action,
+                    isFutures: isFuturesAction(tx.action),
+                    quantity: tx.quantity,
+                    price: tx.price,
+                    leverage: tx.leverage,
+                    market: tx.market,
+                    asset_type: tx.asset_type
+                })));
+            }
 
             // ========== SPOT ASSETS ==========
-            const spotHoldings = new Map<string, { quantity: number; costBasis: number }>();
+            const spotHoldings = new Map<string, { quantity: number; costBasis: number; assetType: string; currency: string; transactions: Transaction[] }>();
 
             spotTxs.forEach(tx => {
-                const current = spotHoldings.get(tx.symbol) || { quantity: 0, costBasis: 0 };
+                const current = spotHoldings.get(tx.symbol) || { quantity: 0, costBasis: 0, assetType: tx.asset_type, currency: tx.currency || 'THB', transactions: [] };
+                current.transactions.push(tx);
+
+                // Convert cost from transaction currency to THB
+                const txCurrency = tx.currency || 'THB';
+                let costInTHB = tx.quantity * tx.price + tx.fees;
+                if (txCurrency !== 'THB' && exchangeRates[txCurrency]) {
+                    costInTHB = costInTHB / exchangeRates[txCurrency]; // Convert to THB
+                }
+
                 if (tx.action === 'buy') {
                     current.quantity += tx.quantity;
-                    current.costBasis += tx.quantity * tx.price + tx.fees;
+                    current.costBasis += costInTHB;
                 } else if (tx.action === 'sell') {
                     // Reduce holdings proportionally
                     if (current.quantity > 0) {
@@ -280,11 +305,16 @@ export default function AnalysisPage() {
 
             let spotValue = 0;
             let spotCostBasis = 0;
+            const symbolBreakdown: { symbol: string; assetType: string; quantity: number; costBasis: number; currentValue: number; pnl: number; pnlPercent: number; transactions: Transaction[] }[] = [];
 
             spotHoldings.forEach((holding, symbol) => {
                 if (holding.quantity <= 0) return;
 
-                const asset = portfolio?.assets?.find(a => a.symbol === symbol);
+                const asset = portfolio?.assets?.find(a =>
+                    a.symbol === symbol &&
+                    a.asset_type === holding.assetType
+                );
+                let currentValue = holding.costBasis;
                 if (asset && asset.current_price > 0) {
                     // Calculate value in asset's native currency
                     let valueInAssetCurrency = holding.quantity * asset.current_price;
@@ -299,11 +329,25 @@ export default function AnalysisPage() {
                         valueInAssetCurrency = valueInAssetCurrency / exchangeRates[assetCurrency];
                     }
 
+                    currentValue = valueInAssetCurrency;
                     spotValue += valueInAssetCurrency;
                 } else {
                     spotValue += holding.costBasis; // fallback
                 }
                 spotCostBasis += holding.costBasis;
+
+                const pnl = currentValue - holding.costBasis;
+                const pnlPercent = holding.costBasis > 0 ? (pnl / holding.costBasis) * 100 : 0;
+                symbolBreakdown.push({
+                    symbol,
+                    assetType: holding.assetType,
+                    quantity: holding.quantity,
+                    costBasis: holding.costBasis,
+                    currentValue,
+                    pnl,
+                    pnlPercent,
+                    transactions: holding.transactions,
+                });
             });
 
             const spotUnrealizedPnL = spotValue - spotCostBasis;
@@ -312,44 +356,93 @@ export default function AnalysisPage() {
             let futuresRealizedPnL = 0;
             let futuresUnrealizedPnL = 0;
 
-            const futuresBySymbol = new Map<string, typeof futuresTxs>();
+            // Group by symbol + market for accurate matching
+            const futuresBySymbolMarket = new Map<string, typeof futuresTxs>();
             futuresTxs.forEach(tx => {
-                const list = futuresBySymbol.get(tx.symbol) || [];
+                const key = `${tx.symbol}:${tx.market || ''}`;
+                const list = futuresBySymbolMarket.get(key) || [];
                 list.push(tx);
-                futuresBySymbol.set(tx.symbol, list);
+                futuresBySymbolMarket.set(key, list);
             });
 
-            futuresBySymbol.forEach((txs, symbol) => {
+            Array.from(futuresBySymbolMarket.entries()).forEach(([key, txs]) => {
+                const [symbol, market] = key.split(':');
                 txs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-                let longQueue: { quantity: number; price: number; leverage: number }[] = [];
-                let shortQueue: { quantity: number; price: number; leverage: number }[] = [];
+                let symbolRealizedPnL = 0;
+                let symbolUnrealizedPnL = 0;
+                let totalCostBasis = 0;
+
+                const longQueue: { quantity: number; price: number; leverage: number }[] = [];
+                const shortQueue: { quantity: number; price: number; leverage: number }[] = [];
+
+                // Determine transaction currency (assume all txs for same symbol/market share currency)
+                const firstTx = txs[0];
+                const txCurrency = firstTx.currency || 'THB';
+
+                // Look up asset to check for current price and its currency
+                const asset = portfolio?.assets?.find(a =>
+                    a.symbol === symbol &&
+                    a.asset_type === firstTx.asset_type &&
+                    (market ? a.market === market : true)
+                );
+
+                // Helper to resolve currency aliases (e.g. USDT -> USD)
+                const resolveCurrency = (c: string) => {
+                    const upper = c.toUpperCase();
+                    if (upper === 'USDT' || upper === 'USDC' || upper === 'BUSD') return 'USD';
+                    return upper;
+                };
+
+                const baseCurrency = resolveCurrency(txCurrency);
+
+                // Helper to convert value to THB
+                const toThb = (amount: number, currency: string) => {
+                    const code = resolveCurrency(currency);
+                    if (code === 'THB') return amount;
+                    // exchangeRates stores units per THB (e.g. 1 THB = 0.03 USD)
+                    const rate = exchangeRates[code];
+                    return rate ? amount / rate : amount;
+                };
 
                 txs.forEach(tx => {
                     const leverage = tx.leverage || 1;
 
                     if (tx.action === 'long') {
                         longQueue.push({ quantity: tx.quantity, price: tx.price, leverage });
+                        // Add cost basis converted to THB
+                        totalCostBasis += toThb(tx.quantity * tx.price * leverage, txCurrency);
                     } else if (tx.action === 'close_long') {
                         let remaining = tx.quantity;
                         while (remaining > 0 && longQueue.length > 0) {
                             const entry = longQueue[0];
                             const matched = Math.min(remaining, entry.quantity);
+                            // P&L in original currency
                             const pnl = (tx.price - entry.price) * matched * entry.leverage;
-                            futuresRealizedPnL += pnl;
+                            // Convert P&L to THB
+                            const pnlThb = toThb(pnl, txCurrency);
+
+                            futuresRealizedPnL += pnlThb;
+                            symbolRealizedPnL += pnlThb;
                             remaining -= matched;
                             entry.quantity -= matched;
                             if (entry.quantity <= 0) longQueue.shift();
                         }
                     } else if (tx.action === 'short') {
                         shortQueue.push({ quantity: tx.quantity, price: tx.price, leverage });
+                        totalCostBasis += toThb(tx.quantity * tx.price * leverage, txCurrency);
                     } else if (tx.action === 'close_short') {
                         let remaining = tx.quantity;
                         while (remaining > 0 && shortQueue.length > 0) {
                             const entry = shortQueue[0];
                             const matched = Math.min(remaining, entry.quantity);
+                            // P&L in original currency
                             const pnl = (entry.price - tx.price) * matched * entry.leverage;
-                            futuresRealizedPnL += pnl;
+                            // Convert P&L to THB
+                            const pnlThb = toThb(pnl, txCurrency);
+
+                            futuresRealizedPnL += pnlThb;
+                            symbolRealizedPnL += pnlThb;
                             remaining -= matched;
                             entry.quantity -= matched;
                             if (entry.quantity <= 0) shortQueue.shift();
@@ -358,20 +451,69 @@ export default function AnalysisPage() {
                 });
 
                 // Calculate unrealized P&L for open positions
-                const asset = portfolio?.assets?.find(a => a.symbol === symbol);
+                const assetCurrency = asset?.currency || 'THB';
                 const currentPrice = asset?.current_price || 0;
 
+                // Debug log for XAG
+                if (symbol === 'XAG') {
+                    console.log('XAG futures debug:', {
+                        symbol, market,
+                        txCurrency, assetCurrency,
+                        currentPrice,
+                        currentPriceThb: toThb(currentPrice, assetCurrency),
+                        longQueue, shortQueue
+                    });
+                }
+
+                let openQty = 0;
+
                 longQueue.forEach(pos => {
+                    openQty += pos.quantity;
                     if (currentPrice > 0) {
-                        futuresUnrealizedPnL += (currentPrice - pos.price) * pos.quantity * pos.leverage;
+                        // We need to compare prices in same currency.
+                        // Convert Entry Price to THB and Current Price to THB
+                        const entryPriceThb = toThb(pos.price, txCurrency);
+                        const currentPriceThb = toThb(currentPrice, assetCurrency);
+
+                        // P&L = (Current - Entry) * Qty * Leverage
+                        // This P&L will be in THB
+                        const pnlThb = (currentPriceThb - entryPriceThb) * pos.quantity * pos.leverage;
+
+                        futuresUnrealizedPnL += pnlThb;
+                        symbolUnrealizedPnL += pnlThb;
                     }
                 });
 
                 shortQueue.forEach(pos => {
+                    openQty -= pos.quantity; // short is negative
                     if (currentPrice > 0) {
-                        futuresUnrealizedPnL += (pos.price - currentPrice) * pos.quantity * pos.leverage;
+                        const entryPriceThb = toThb(pos.price, txCurrency);
+                        const currentPriceThb = toThb(currentPrice, assetCurrency);
+
+                        const pnlThb = (entryPriceThb - currentPriceThb) * pos.quantity * pos.leverage;
+
+                        futuresUnrealizedPnL += pnlThb;
+                        symbolUnrealizedPnL += pnlThb;
                     }
                 });
+
+                // Add futures to symbolBreakdown
+                const totalPnL = symbolRealizedPnL + symbolUnrealizedPnL;
+                const currentValue = totalCostBasis + totalPnL;
+                const pnlPercent = totalCostBasis > 0 ? (totalPnL / totalCostBasis) * 100 : 0;
+
+                if (txs.length > 0) {
+                    symbolBreakdown.push({
+                        symbol,
+                        assetType: txs[0].asset_type,
+                        quantity: openQty,
+                        costBasis: totalCostBasis,
+                        currentValue: currentValue,
+                        pnl: totalPnL,
+                        pnlPercent,
+                        transactions: txs,
+                    });
+                }
             });
 
             const totalValue = spotValue + futuresRealizedPnL + futuresUnrealizedPnL;
@@ -390,9 +532,10 @@ export default function AnalysisPage() {
                 totalValue,
                 totalPnL,
                 goalProgress,
+                symbolBreakdown,
             };
         }).filter(a => a.spotValue !== 0 || a.futuresRealizedPnL !== 0 || a.futuresUnrealizedPnL !== 0 || a.account.target_value);
-    }, [accounts, transactions, portfolio]);
+    }, [accounts, transactions, portfolio, exchangeRates]);
 
     if (isLoading || isLoadingRates) {
         return (
@@ -466,63 +609,124 @@ export default function AnalysisPage() {
                                 </thead>
                                 <tbody>
                                     {accountAnalysis.map((item) => (
-                                        <tr key={item.account.id} className="border-t border-gray-700/50 hover:bg-gray-700/20">
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div
-                                                        className="w-3 h-3 rounded-full"
-                                                        style={{ backgroundColor: item.account.color || '#10b981' }}
-                                                    />
-                                                    <div>
-                                                        <div className="font-semibold text-white">{item.account.name}</div>
-                                                        {item.account.description && (
-                                                            <div className="text-xs text-gray-500">{item.account.description}</div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-4 text-right text-white font-mono">
-                                                {formatCurrency(convertToDisplayCurrency(item.spotValue, item.account.target_currency), displayCurrency)}
-                                            </td>
-                                            <td className={`px-4 py-4 text-right font-mono ${item.spotUnrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                {item.spotUnrealizedPnL >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.spotUnrealizedPnL, item.account.target_currency), displayCurrency)}
-                                            </td>
-                                            <td className={`px-4 py-4 text-right font-mono ${item.futuresRealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                {item.futuresRealizedPnL >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.futuresRealizedPnL, item.account.target_currency), displayCurrency)}
-                                            </td>
-                                            <td className={`px-4 py-4 text-right font-mono ${item.futuresUnrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                {item.futuresUnrealizedPnL >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.futuresUnrealizedPnL, item.account.target_currency), displayCurrency)}
-                                            </td>
-                                            <td className="px-4 py-4 text-right font-mono font-bold text-white">
-                                                {formatCurrency(convertToDisplayCurrency(item.totalValue, item.account.target_currency), displayCurrency)}
-                                            </td>
-                                            <td className="px-4 py-4 text-right text-gray-400">
-                                                {item.account.target_value
-                                                    ? formatCurrency(convertToDisplayCurrency(item.account.target_value, item.account.target_currency), displayCurrency)
-                                                    : '-'
-                                                }
-                                            </td>
-                                            <td className="px-4 py-4">
-                                                {item.account.target_value ? (
+                                        <React.Fragment key={item.account.id}>
+                                            <tr
+                                                className="border-t border-gray-700/50 hover:bg-gray-700/20 cursor-pointer transition-colors"
+                                                onClick={() => setExpandedAccountId(expandedAccountId === item.account.id ? null : item.account.id)}
+                                            >
+                                                <td className="px-6 py-4">
                                                     <div className="flex items-center gap-2">
-                                                        <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
-                                                            <div
-                                                                className="h-full rounded-full transition-all"
-                                                                style={{
-                                                                    width: `${Math.min(item.goalProgress, 100)}%`,
-                                                                    backgroundColor: item.account.color || '#10b981',
-                                                                }}
-                                                            />
+                                                        <svg className={`w-4 h-4 text-gray-400 transition-transform ${expandedAccountId === item.account.id ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                        </svg>
+                                                        <div
+                                                            className="w-3 h-3 rounded-full"
+                                                            style={{ backgroundColor: item.account.color || '#10b981' }}
+                                                        />
+                                                        <div>
+                                                            <div className="font-semibold text-white">{item.account.name}</div>
+                                                            {item.account.description && (
+                                                                <div className="text-xs text-gray-500">{item.account.description}</div>
+                                                            )}
                                                         </div>
-                                                        <span className={`text-xs font-mono ${item.goalProgress >= 100 ? 'text-emerald-400' : 'text-gray-400'}`}>
-                                                            {item.goalProgress.toFixed(1)}%
-                                                        </span>
                                                     </div>
-                                                ) : (
-                                                    <span className="text-gray-500 text-xs">{t('ไม่มีเป้า', 'No goal')}</span>
-                                                )}
-                                            </td>
-                                        </tr>
+                                                </td>
+                                                <td className="px-4 py-4 text-right text-white font-mono">
+                                                    {formatCurrency(convertToDisplayCurrency(item.spotValue, item.account.target_currency), displayCurrency)}
+                                                </td>
+                                                <td className={`px-4 py-4 text-right font-mono ${item.spotUnrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {item.spotUnrealizedPnL >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.spotUnrealizedPnL, item.account.target_currency), displayCurrency)}
+                                                </td>
+                                                <td className={`px-4 py-4 text-right font-mono ${item.futuresRealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {item.futuresRealizedPnL >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.futuresRealizedPnL, item.account.target_currency), displayCurrency)}
+                                                </td>
+                                                <td className={`px-4 py-4 text-right font-mono ${item.futuresUnrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {item.futuresUnrealizedPnL >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.futuresUnrealizedPnL, item.account.target_currency), displayCurrency)}
+                                                </td>
+                                                <td className="px-4 py-4 text-right font-mono font-bold text-white">
+                                                    {formatCurrency(convertToDisplayCurrency(item.totalValue, item.account.target_currency), displayCurrency)}
+                                                </td>
+                                                <td className="px-4 py-4 text-right text-gray-400">
+                                                    {item.account.target_value
+                                                        ? formatCurrency(convertToDisplayCurrency(item.account.target_value, item.account.target_currency), displayCurrency)
+                                                        : '-'
+                                                    }
+                                                </td>
+                                                <td className="px-4 py-4">
+                                                    {item.account.target_value ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+                                                                <div
+                                                                    className="h-full rounded-full transition-all"
+                                                                    style={{
+                                                                        width: `${Math.min(item.goalProgress, 100)}%`,
+                                                                        backgroundColor: item.account.color || '#10b981',
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                            <span className={`text-xs font-mono ${item.goalProgress >= 100 ? 'text-emerald-400' : 'text-gray-400'}`}>
+                                                                {item.goalProgress.toFixed(1)}%
+                                                            </span>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-gray-500 text-xs">{t('ไม่มีเป้า', 'No goal')}</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                            {/* Expanded Asset Breakdown */}
+                                            {expandedAccountId === item.account.id && (item.symbolBreakdown?.length ?? 0) > 0 && (
+                                                <tr>
+                                                    <td colSpan={8} className="bg-gray-900/50 px-6 py-4">
+                                                        <div className="text-sm text-gray-400 mb-3 font-medium">
+                                                            📊 {t('รายละเอียดสินทรัพย์', 'Asset Breakdown')} ({item.symbolBreakdown?.length ?? 0} {t('รายการ', 'items')})
+                                                        </div>
+                                                        <table className="w-full text-sm">
+                                                            <thead>
+                                                                <tr className="text-gray-500 text-xs border-b border-gray-700/50">
+                                                                    <th className="text-left py-2 px-3">{t('Symbol', 'Symbol')}</th>
+                                                                    <th className="text-left py-2 px-3">{t('ประเภท', 'Type')}</th>
+                                                                    <th className="text-right py-2 px-3">{t('จำนวน', 'Qty')}</th>
+                                                                    <th className="text-right py-2 px-3">{t('ต้นทุน', 'Cost')}</th>
+                                                                    <th className="text-right py-2 px-3">{t('มูลค่าปัจจุบัน', 'Current Value')}</th>
+                                                                    <th className="text-right py-2 px-3">{t('P&L', 'P&L')}</th>
+                                                                    <th className="text-right py-2 px-3">%</th>
+                                                                    <th className="text-right py-2 px-3">{t('รายการ', 'Txs')}</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(item.symbolBreakdown ?? []).sort((a, b) => b.currentValue - a.currentValue).map((asset) => (
+                                                                    <tr key={asset.symbol} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                                                                        <td className="py-2 px-3 text-white font-medium">{asset.symbol}</td>
+                                                                        <td className="py-2 px-3 text-gray-400">{getAssetTypeName(asset.assetType as any, settings.language)}</td>
+                                                                        <td className="py-2 px-3 text-right text-gray-300 font-mono">
+                                                                            {asset.quantity < 0.01
+                                                                                ? asset.quantity.toFixed(8)
+                                                                                : asset.quantity < 1
+                                                                                    ? asset.quantity.toFixed(6)
+                                                                                    : formatNumber(asset.quantity)
+                                                                            }
+                                                                        </td>
+                                                                        <td className="py-2 px-3 text-right text-gray-400 font-mono">
+                                                                            {formatCurrency(convertToDisplayCurrency(asset.costBasis, item.account.target_currency), displayCurrency)}
+                                                                        </td>
+                                                                        <td className="py-2 px-3 text-right text-white font-mono">
+                                                                            {formatCurrency(convertToDisplayCurrency(asset.currentValue, item.account.target_currency), displayCurrency)}
+                                                                        </td>
+                                                                        <td className={`py-2 px-3 text-right font-mono ${asset.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                            {asset.pnl >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(asset.pnl, item.account.target_currency), displayCurrency)}
+                                                                        </td>
+                                                                        <td className={`py-2 px-3 text-right font-mono ${asset.pnlPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                                            {asset.pnlPercent >= 0 ? '+' : ''}{asset.pnlPercent.toFixed(2)}%
+                                                                        </td>
+                                                                        <td className="py-2 px-3 text-right text-gray-500">{asset.transactions.length}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
                                     ))}
                                 </tbody>
                                 {/* Total row */}
@@ -673,30 +877,92 @@ export default function AnalysisPage() {
                 </div>
 
                 {/* Asset Type Breakdown */}
-                {analysis?.byAssetType && Object.keys(analysis.byAssetType).length > 0 && (
-                    <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden">
-                        <div className="px-6 py-4 border-b border-gray-700/50">
-                            <h2 className="text-lg font-semibold text-white">📊 {t('สัดส่วนประเภทสินทรัพย์', 'Asset Type Breakdown')}</h2>
-                        </div>
-                        <div className="p-6">
-                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                                {Object.entries(analysis.byAssetType).map(([type, value]) => {
-                                    const total = Object.values(analysis.byAssetType).reduce((a, b) => a + b, 0);
-                                    const percent = total > 0 ? (value / total) * 100 : 0;
-                                    return (
-                                        <div key={type} className="bg-gray-700/30 rounded-lg p-4 text-center">
-                                            <div className="text-gray-400 text-sm mb-1">{getAssetTypeName(type as any, settings.language)}</div>
-                                            <div className="text-white font-bold">{percent.toFixed(1)}%</div>
-                                            <div className="text-xs text-gray-500 mt-1">
-                                                {formatCurrency(convertToDisplayCurrency(value), displayCurrency)}
-                                            </div>
+                {analysis?.byAssetType && Object.keys(analysis.byAssetType).length > 0 && (() => {
+                    const entries = Object.entries(analysis.byAssetType);
+                    const total = Object.values(analysis.byAssetType).reduce((a, b) => a + Math.abs(b), 0);
+                    const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+
+                    // Calculate pie chart segments
+                    let cumulativePercent = 0;
+                    const segments = entries.map(([type, value], index) => {
+                        const percent = total > 0 ? (Math.abs(value) / total) * 100 : 0;
+                        const startAngle = cumulativePercent * 3.6 - 90; // Convert to degrees
+                        cumulativePercent += percent;
+                        const endAngle = cumulativePercent * 3.6 - 90;
+
+                        // Calculate SVG arc path
+                        const startRad = (startAngle * Math.PI) / 180;
+                        const endRad = (endAngle * Math.PI) / 180;
+                        const x1 = 50 + 40 * Math.cos(startRad);
+                        const y1 = 50 + 40 * Math.sin(startRad);
+                        const x2 = 50 + 40 * Math.cos(endRad);
+                        const y2 = 50 + 40 * Math.sin(endRad);
+                        const largeArc = percent > 50 ? 1 : 0;
+
+                        return {
+                            type,
+                            value,
+                            percent,
+                            color: colors[index % colors.length],
+                            path: percent >= 100
+                                ? `M 50 10 A 40 40 0 1 1 49.99 10 Z`
+                                : `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`
+                        };
+                    });
+
+                    return (
+                        <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden">
+                            <div className="px-6 py-4 border-b border-gray-700/50">
+                                <h2 className="text-lg font-semibold text-white">📊 {t('สัดส่วนประเภทสินทรัพย์', 'Asset Type Breakdown')}</h2>
+                            </div>
+                            <div className="p-6">
+                                <div className="flex flex-col lg:flex-row gap-6 items-center">
+                                    {/* Pie Chart */}
+                                    <div className="flex-shrink-0">
+                                        <svg viewBox="0 0 100 100" className="w-48 h-48">
+                                            {segments.map((seg, i) => (
+                                                <path
+                                                    key={seg.type}
+                                                    d={seg.path}
+                                                    fill={seg.color}
+                                                    stroke="#1f2937"
+                                                    strokeWidth="0.5"
+                                                    className="transition-opacity hover:opacity-80 cursor-pointer"
+                                                />
+                                            ))}
+                                            {/* Center hole for donut effect */}
+                                            <circle cx="50" cy="50" r="25" fill="#1f2937" />
+                                            <text x="50" y="50" textAnchor="middle" dominantBaseline="middle" className="fill-white text-[8px] font-bold">
+                                                {formatCurrency(convertToDisplayCurrency(total), displayCurrency)}
+                                            </text>
+                                        </svg>
+                                    </div>
+
+                                    {/* Legend and Cards */}
+                                    <div className="flex-1 w-full">
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            {segments.map((seg) => (
+                                                <div key={seg.type} className="bg-gray-700/30 rounded-lg p-3 flex items-center gap-3">
+                                                    <div
+                                                        className="w-4 h-4 rounded-full flex-shrink-0"
+                                                        style={{ backgroundColor: seg.color }}
+                                                    />
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-gray-400 text-xs truncate">{getAssetTypeName(seg.type as any, settings.language)}</div>
+                                                        <div className="text-white font-bold text-sm">{seg.percent.toFixed(1)}%</div>
+                                                        <div className="text-xs text-gray-500 truncate">
+                                                            {formatCurrency(convertToDisplayCurrency(seg.value), displayCurrency)}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
-                                    );
-                                })}
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
 
                 {/* Monthly Purchase Performance */}
                 {analysis?.monthlyPerformance && analysis.monthlyPerformance.length > 0 && (

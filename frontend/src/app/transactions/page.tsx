@@ -39,11 +39,17 @@ export default function TransactionsPage() {
     const fetchData = useCallback(async () => {
         try {
             setIsLoading(true);
-            const [txData, portfolioData] = await Promise.all([
+            const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8090';
+            const [txData, portfolioData, pricesResponse] = await Promise.all([
                 getTransactions(),
-                getPortfolio()
+                getPortfolio(),
+                fetch(`${pbUrl}/api/collections/asset_prices/records?perPage=500`).then(r => r.json())
             ]);
             setTransactions(txData);
+            // Attach assetPrices to portfolio for fallback P&L calculation
+            if (portfolioData) {
+                (portfolioData as any).assetPrices = pricesResponse.items || [];
+            }
             setPortfolio(portfolioData);
             setError(null);
         } catch (err) {

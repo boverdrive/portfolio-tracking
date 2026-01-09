@@ -82,8 +82,8 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok()),
             // Initial admin user
-            admin_email: env::var("ADMIN_EMAIL").ok(),
-            admin_password: env::var("ADMIN_PASSWORD").ok(),
+            admin_email: env::var("POCKETBASE_ADMIN_EMAIL").ok().filter(|v| !v.is_empty()).or_else(|| env::var("ADMIN_EMAIL").ok().filter(|v| !v.is_empty())),
+            admin_password: env::var("POCKETBASE_ADMIN_PASSWORD").ok().filter(|v| !v.is_empty()).or_else(|| env::var("ADMIN_PASSWORD").ok().filter(|v| !v.is_empty())),
         }
     }
 

@@ -16,12 +16,15 @@ use crate::models::{
     LinkedProvider, UserResponse,
 };
 
+use crate::services::PocketBaseClient;
+
 /// Auth service for handling OAuth/OIDC authentication
 #[derive(Clone)]
 pub struct AuthService {
     config: Config,
     http_client: reqwest::Client,
     pocketbase_url: String,
+    pb_client: PocketBaseClient,
     // In-memory storage for users (cache + fallback)
     users: Arc<RwLock<HashMap<String, User>>>,
     loaded_users: Arc<RwLock<bool>>,
@@ -62,12 +65,13 @@ pub struct OAuthCallbackParams {
 }
 
 impl AuthService {
-    pub async fn new(config: Config) -> Self {
+    pub async fn new(config: Config, pb_client: PocketBaseClient) -> Self {
         let pocketbase_url = config.pocketbase_url.clone();
         let service = Self {
             config: config.clone(),
             http_client: reqwest::Client::new(),
             pocketbase_url,
+            pb_client,
             users: Arc::new(RwLock::new(HashMap::new())),
             loaded_users: Arc::new(RwLock::new(false)),
             oauth_accounts: Arc::new(RwLock::new(HashMap::new())),
@@ -102,6 +106,7 @@ impl AuthService {
         // Always reload users from PocketBase on startup
         tracing::info!("📦 Loading users from PocketBase...");
 
+        let token = self.pb_client.get_token().await;
         let url = format!("{}/api/collections/users/records?perPage=500", self.pocketbase_url);
         
         #[derive(serde::Deserialize)]
@@ -125,7 +130,14 @@ impl AuthService {
             "user".to_string()
         }
 
-        match self.http_client.get(&url).send().await {
+        let request = self.http_client.get(&url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+
+        match request.send().await {
             Ok(response) => {
                 if response.status().is_success() {
                     if let Ok(data) = response.json::<PBListResponse<PBUser>>().await {
@@ -171,6 +183,7 @@ impl AuthService {
         let user_clone = user.clone();
         let client = self.http_client.clone();
         let pb_url = self.pocketbase_url.clone();
+        let pb_client = self.pb_client.clone();
         
         #[derive(serde::Serialize)]
         struct PBUserPayload {
@@ -200,9 +213,14 @@ impl AuthService {
         tokio::spawn(async move {
             tracing::info!("🔄 Syncing user to PocketBase: {} (role: {})", user_clone.id, user_clone.role);
             
+            let token = pb_client.get_token().await;
+
             // First try to update existing record
             let update_url = format!("{}/api/collections/users/records/{}", pb_url, user_clone.id);
-            match client.patch(&update_url).json(&payload).send().await {
+            let req = client.patch(&update_url);
+            let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+            
+            match req.json(&payload).send().await {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {
@@ -214,7 +232,10 @@ impl AuthService {
             }
             
             // If update fails, try to create new record
-            match client.post(&url).json(&payload).send().await {
+            let req = client.post(&url);
+            let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+            
+            match req.json(&payload).send().await {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {

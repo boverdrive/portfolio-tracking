@@ -1,6 +1,7 @@
 //! Symbols service for PocketBase storage
 
 use crate::error::AppError;
+use crate::services::PocketBaseClient;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -34,15 +35,17 @@ struct PBListResponse {
 pub struct SymbolsService {
     pocketbase_url: String,
     http_client: reqwest::Client,
+    pb_client: PocketBaseClient,
     cache: Arc<RwLock<Vec<Symbol>>>,
     loaded: Arc<RwLock<bool>>,
 }
 
 impl SymbolsService {
-    pub fn new(pocketbase_url: String) -> Self {
+    pub fn new(pocketbase_url: String, pb_client: PocketBaseClient) -> Self {
         Self {
             pocketbase_url,
             http_client: reqwest::Client::new(),
+            pb_client,
             cache: Arc::new(RwLock::new(Vec::new())),
             loaded: Arc::new(RwLock::new(false)),
         }
@@ -55,9 +58,13 @@ impl SymbolsService {
             return Ok(());
         }
 
+        let token = self.pb_client.get_token().await;
         let url = format!("{}/api/collections/symbols/records?perPage=2000", self.pocketbase_url);
 
-        match self.http_client.get(&url).send().await {
+        let request = self.http_client.get(&url);
+        let request = if !token.is_empty() { request.header("Authorization", token) } else { request };
+
+        match request.send().await {
             Ok(response) => {
                 if response.status().is_success() {
                     if let Ok(data) = response.json::<PBListResponse>().await {
@@ -119,6 +126,13 @@ impl SymbolsService {
     pub async fn seed_symbols(&self, symbols: Vec<Symbol>) -> Result<usize, AppError> {
         let url = format!("{}/api/collections/symbols/records", self.pocketbase_url);
         let mut count = 0;
+        let pb_client = self.pb_client.clone();
+        
+        let client = self.http_client.clone();
+        
+        // We can't use parallel iter here easily with async token fetch per item if we want efficiency.
+        // Actually, we can just get token once.
+        let token = pb_client.get_token().await;
 
         for symbol in symbols {
             // Create payload without ID (let PocketBase generate it)
@@ -132,7 +146,10 @@ impl SymbolsService {
                 "icon_url": symbol.icon_url,
             });
 
-            match self.http_client.post(&url).json(&payload).send().await {
+            let req = client.post(&url);
+            let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+
+            match req.json(&payload).send().await {
                 Ok(resp) => {
                     if resp.status().is_success() {
                         count += 1;

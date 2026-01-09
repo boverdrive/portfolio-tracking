@@ -71,12 +71,28 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
 
                 if (portfolio && (tx.action === 'buy' || tx.action === 'long' || tx.action === 'short')) {
                     const asset = portfolio.assets.find(a => a.symbol === tx.symbol);
+
+                    // Get current price from portfolio assets or fallback to assetPrices prop
+                    let currentPriceVal = 0;
+                    let assetCurrency = tx.currency || 'THB';
+
                     if (asset) {
-                        // Use convertToDisplayCurrency if available, otherwise assume same currency or handle via API
-                        const currentPriceVal = convertToDisplayCurrency
+                        assetCurrency = asset.currency;
+                        currentPriceVal = convertToDisplayCurrency
                             ? convertToDisplayCurrency(asset.current_price, asset.currency)
                             : asset.current_price;
+                    } else if ((portfolio as any).assetPrices) {
+                        // Fallback to assetPrices if available
+                        const priceRecord = (portfolio as any).assetPrices.find((p: any) => p.symbol === tx.symbol);
+                        if (priceRecord) {
+                            assetCurrency = priceRecord.currency;
+                            currentPriceVal = convertToDisplayCurrency
+                                ? convertToDisplayCurrency(priceRecord.price, priceRecord.currency)
+                                : priceRecord.price;
+                        }
+                    }
 
+                    if (currentPriceVal > 0) {
                         const txPriceVal = convertToDisplayCurrency
                             ? convertToDisplayCurrency(tx.price, tx.currency)
                             : tx.price;

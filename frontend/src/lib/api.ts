@@ -356,3 +356,16 @@ export async function reorderAccounts(ids: string[]): Promise<void> {
         body: JSON.stringify(ids),
     });
 }
+
+// ==================== System API ====================
+
+export interface SeedResponse {
+    seeded: number;
+    message: string;
+}
+
+export async function seedSymbols(): Promise<SeedResponse> {
+    return fetchApi<SeedResponse>('/api/symbols/seed', {
+        method: 'POST',
+    });
+}

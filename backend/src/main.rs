@@ -49,9 +49,9 @@ async fn main() {
     let db = PocketBaseClient::new(config.clone());
     let price_service = PriceService::new(config.clone());
     let exchange_rate_service = ExchangeRateService::new(config.clone());
-    let auth_service = AuthService::new(config.clone()).await;
-    let job_scheduler = JobScheduler::new(config.clone());
-    let symbols_service = SymbolsService::new(config.pocketbase_url.clone());
+    let auth_service = AuthService::new(config.clone(), db.clone()).await;
+    let job_scheduler = JobScheduler::new(config.clone(), db.clone());
+    let symbols_service = SymbolsService::new(config.pocketbase_url.clone(), db.clone());
     
     // Initialize job scheduler (load jobs from database)
     if let Err(e) = job_scheduler.initialize().await {
