@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use reqwest::Client;
 
 use crate::config::Config;
@@ -57,8 +57,84 @@ impl JobScheduler {
                 self.ensure_default_job().await;
             }
         }
-        
+        // Initialize default providers if missing
+        self.ensure_default_providers().await;
+
         Ok(())
+    }
+
+    /// Ensure default API providers exist in the database
+    async fn ensure_default_providers(&self) {
+        // Define default providers
+        // (market_id, provider_name, provider_type, api_url, priority)
+        let defaults = vec![
+            ("thai_stock", "SET Market Data", "set_marketdata", "https://www.set.or.th", 1),
+            ("us_stock", "Yahoo Finance", "yahoo_finance", "https://query1.finance.yahoo.com", 1),
+            ("crypto", "Binance", "binance", "https://api.binance.com", 1),
+            ("crypto", "CoinGecko", "coingecko", "https://api.coingecko.com", 2),
+            ("crypto", "Bitkub", "bitkub", "https://api.bitkub.com", 3),
+            ("crypto", "OKX", "okx", "https://www.okx.com", 4),
+            ("crypto", "KuCoin", "kucoin", "https://api.kucoin.com", 5),
+            ("crypto", "HTX", "htx", "https://api.htx.com", 6),
+            ("gold", "Thai Gold Traders", "goldtraders", "https://www.goldtraders.or.th", 1),
+            ("gold", "Gold API", "goldapi", "https://www.goldapi.io", 2),
+            ("tfex", "Yahoo Finance (Futures)", "yahoo_finance", "https://query1.finance.yahoo.com", 1),
+        ];
+
+        let token = self.pb_client.get_token().await;
+        
+        for (market_id, name, p_type, url, priority) in defaults {
+            // Check if exists
+            let filter = format!("market_id='{}' && provider_type='{}'", market_id, p_type);
+            let check_url = format!(
+                "{}/api/collections/api_providers/records?filter={}&perPage=1",
+                self.pocketbase_url,
+                urlencoding::encode(&filter)
+            );
+            
+            let req = self.http_client.get(&check_url);
+            let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+            
+            match req.send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    let body: serde_json::Value = resp.json().await.unwrap_or_default();
+                    if let Some(items) = body.get("items").and_then(|i| i.as_array()) {
+                        if !items.is_empty() {
+                            continue; // Already exists
+                        }
+                    }
+                }
+                _ => continue, // Skip on error to avoid spamming logs or crashing
+            }
+
+            // Create if missing
+            let create_url = format!("{}/api/collections/api_providers/records", self.pocketbase_url);
+            let payload = serde_json::json!({
+                "market_id": market_id,
+                "provider_name": name,
+                "provider_type": p_type,
+                "api_url": url,
+                "priority": priority,
+                "enabled": true,
+                "timeout_ms": 10000
+            });
+            
+            let req = self.http_client.post(&create_url);
+            let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+            
+            match req.json(&payload).send().await {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        tracing::info!("✅ Created default API provider: {} ({})", name, market_id);
+                    } else {
+                        tracing::warn!("⚠️ Failed to create provider {}: {}", name, resp.status());
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ Generic error creating provider {}: {}", name, e);
+                }
+            }
+        }
     }
 
     /// Ensure default job exists (in-memory or database)
@@ -228,8 +304,9 @@ impl JobScheduler {
             // Execute the job based on type
             let result = match job.job_type.as_str() {
                 "api_status_check" => self.run_api_status_check().await,
-                "price_fetch" => self.run_price_update_job().await,
+                "price_fetch" | "price_update" => self.run_price_update_job().await,
                 "portfolio_snapshot" => self.run_portfolio_snapshot_job().await,
+                "price_history_log" => self.run_price_history_job().await,
                 _ => Err(format!("Unknown job type: {}", job.job_type)),
             };
 
@@ -356,7 +433,7 @@ impl JobScheduler {
         // We need to query all transactions to find out what assets users hold
         // In a real app with many users, this should be optimized
         let token = self.pb_client.get_token().await;
-        let url = format!("{}/api/collections/transactions/records?perPage=500&sort=-created", self.pocketbase_url);
+        let url = format!("{}/api/collections/transactions/records?perPage=500&sort=-timestamp", self.pocketbase_url);
         
         let req = self.http_client.get(&url);
         let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
@@ -380,8 +457,18 @@ impl JobScheduler {
                     .map(|r| r.items)
                     .unwrap_or_default()
             }
-            _ => {
-                tracing::warn!("⚠️ Could not fetch transactions, trying symbols collection...");
+            result => { // Fallback case
+                 match result {
+                     Ok(resp) => {
+                         let status = resp.status();
+                         let body = resp.text().await.unwrap_or_else(|_| "unavailable".to_string());
+                         tracing::warn!("⚠️ Could not fetch transactions. Status: {}, Body: {}. Trying symbols collection...", status, body);
+                     },
+                     Err(e) => {
+                         tracing::warn!("⚠️ Could not fetch transactions. Network Error: {}. Trying symbols collection...", e);
+                     }
+                 }
+
                 // Fallback: Try to get symbols from the 'symbols' collection if transactions fail
                 let symbols_url = format!("{}/api/collections/symbols/records?perPage=500", self.pocketbase_url);
                 #[derive(serde::Deserialize)]
@@ -423,9 +510,11 @@ impl JobScheduler {
         // Collect unique symbols
         let mut unique_symbols: std::collections::HashMap<String, (String, Option<String>, Option<String>)> = std::collections::HashMap::new();
         for tx in transactions {
-            let key = format!("{}-{}", tx.symbol, tx.asset_type);
+            let symbol_upper = tx.symbol.to_uppercase();
+            let asset_type_lower = tx.asset_type.to_lowercase();
+            let key = format!("{}-{}", symbol_upper, asset_type_lower);
             if !unique_symbols.contains_key(&key) {
-                unique_symbols.insert(key, (tx.asset_type, tx.market, tx.currency));
+                unique_symbols.insert(key, (asset_type_lower, tx.market, tx.currency));
             }
         }
         
@@ -458,9 +547,15 @@ impl JobScheduler {
                 Ok(price_entry) => {
                     // Save or update price in PocketBase
                     let curr = currency.clone().unwrap_or_else(|| price_entry.currency.clone());
+                    let market_val = market_str.as_ref().map(|m| m.to_lowercase());
                     
                     // Check if price record exists
-                    let filter = format!("symbol='{}' && asset_type='{}'", symbol, asset_type_str);
+                    let filter = if let Some(m) = &market_val {
+                        format!("symbol='{}' && asset_type='{}' && market='{}'", symbol, asset_type_str, m)
+                    } else {
+                        format!("symbol='{}' && asset_type='{}'", symbol, asset_type_str)
+                    };
+                    
                     let check_url = format!(
                         "{}/api/collections/asset_prices/records?filter={}",
                         self.pocketbase_url,
@@ -476,7 +571,7 @@ impl JobScheduler {
                         "asset_type": asset_type_str,
                         "price": price_entry.price,
                         "currency": curr,
-                        "market": market_str,
+                        "market": market_val,
                         "last_updated": now.clone()
                     });
                     
@@ -596,6 +691,168 @@ impl JobScheduler {
             "lbma" => Ok(Market::Lbma),
             _ => Err(format!("Invalid market: {}", s)),
         }
+    }
+
+    /// Start the job scheduler loop (spawns a background task)
+    pub fn start(&self) {
+        let scheduler = self.clone();
+        tokio::spawn(async move {
+            tracing::info!("⏰ Job scheduler loop started");
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60)); // Check every minute
+            
+            loop {
+                interval.tick().await;
+                
+                // Get all enabled jobs
+                let jobs = scheduler.get_jobs().await;
+                let now = Utc::now();
+                
+                for job in jobs {
+                    if !job.enabled {
+                        continue;
+                    }
+
+                    let should_run = if let Some(times) = &job.schedule_times {
+                        // Check if current time matches any scheduled time (HH:MM)
+                        // We check if we are in the same minute as the scheduled time
+                        // AND we haven't run already in this minute (implied by 60s sleep but handled safer below)
+                        let current_time = now.format("%H:%M").to_string();
+                        let is_time_match = times.contains(&current_time);
+                        
+                        // To avoid double running in the same minute:
+                        // Check if last_run was less than 60 seconds ago
+                        let ran_recently = if let Some(last) = &job.last_run {
+                             match DateTime::parse_from_rfc3339(last) {
+                                Ok(dt) => {
+                                    let diff = now.timestamp() - dt.with_timezone(&Utc).timestamp();
+                                    diff.abs() < 65
+                                },
+                                Err(_) => false,
+                            }
+                        } else {
+                            false
+                        };
+
+                        is_time_match && !ran_recently
+                    } else if let Some(next) = &job.next_run {
+                         match DateTime::parse_from_rfc3339(next) {
+                            Ok(dt) => now >= dt.with_timezone(&Utc),
+                            Err(_) => true, // If parsing fails, maybe run? Or safe default false.
+                        }
+                    } else {
+                        // If no next_run set but enabled, set it for now
+                        true
+                    };
+
+                    if should_run {
+                        tracing::info!("🚀 Triggering scheduled job: {} ({})", job.name, job.id);
+                        
+                        // We use run_job_now which updates status/DB
+                        // But for schedule_times, we need to handle next_run differently
+                        // If using schedule_times, next_run is just informational for the NEXT slot
+                        
+                        match scheduler.run_job_now(&job.id).await {
+                           Ok(_) => tracing::info!("✅ Job {} completed successfully", job.name),
+                           Err(e) => tracing::error!("❌ Job {} failed: {}", job.name, e),
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// Run price history job - fetch prices and save to history collection
+    async fn run_price_history_job(&self) -> Result<serde_json::Value, String> {
+        tracing::info!("📈 Running price history job...");
+        
+        // Step 1: Reuse getting unique symbols from run_price_update_job logic
+        // ... (This duplication is suboptimal but safe for now to keep existing job working intact)
+        
+         let token = self.pb_client.get_token().await;
+
+        // Get all unique assets from transactions (same logic as price update)
+
+        
+        // ... (Simplified fetching logic reuse)
+        // Ideally we should extract `get_unique_symbols` to a helper method
+        // For now, let's implement the core logic directly
+        
+        // Fetch unique symbols from "prices" logic is complex with PB.
+        // Let's assume we want to track ALL symbols that are currently in 'asset_prices' (active assets)
+        // This is safer than re-querying transactions potentially
+        
+        let prices_url = format!("{}/api/collections/asset_prices/records?perPage=500", self.pocketbase_url);
+        let req = self.http_client.get(&prices_url);
+        let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+        
+        let assets_to_track: Vec<serde_json::Value> = match req.send().await {
+            Ok(resp) if resp.status().is_success() => {
+                 resp.json::<serde_json::Value>().await
+                    .ok()
+                    .and_then(|v| v.get("items").cloned())
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+            },
+            _ => Vec::new(),
+        };
+        
+        tracing::info!("Found {} assets to track history for", assets_to_track.len());
+        
+        let mut recorded = 0;
+        let mut errors = 0;
+        let now = Utc::now();
+        
+        for asset in assets_to_track {
+            let symbol = asset.get("symbol").and_then(|s| s.as_str()).unwrap_or_default();
+            let asset_type_str = asset.get("asset_type").and_then(|s| s.as_str()).unwrap_or_default();
+            let market_str = asset.get("market").and_then(|s| s.as_str());
+            
+            if symbol.is_empty() { continue; }
+            
+            // Re-fetch FRESH price to ensure accuracy at this timestamp
+             let asset_type = match self.parse_asset_type(asset_type_str) {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            
+            let market = market_str.map(|m| self.parse_market(m)).transpose().ok().flatten();
+
+            match self.price_service.get_price(symbol, &asset_type, market.as_ref()).await {
+                Ok(price_entry) => {
+                     let payload = serde_json::json!({
+                        "symbol": symbol,
+                        "asset_type": asset_type_str,
+                        "market": market_str,
+                        "price": price_entry.price,
+                        "currency": price_entry.currency,
+                        "recorded_at": now.to_rfc3339()
+                    });
+                    
+                    let history_url = format!("{}/api/collections/asset_price_history/records", self.pocketbase_url);
+                    let req = self.http_client.post(&history_url);
+                    let req = if !token.is_empty() { req.header("Authorization", &token) } else { req };
+                    
+                    if let Ok(resp) = req.json(&payload).send().await {
+                        if resp.status().is_success() {
+                            recorded += 1;
+                        } else {
+                            errors += 1;
+                            tracing::warn!("Failed to save history for {}", symbol);
+                        }
+                    }
+                },
+                Err(e) => {
+                    errors += 1;
+                     tracing::warn!("Failed to fetch fresh price for {}: {}", symbol, e);
+                }
+            }
+        }
+        
+        Ok(serde_json::json!({
+            "recorded": recorded,
+            "errors": errors,
+            "timestamp": now.to_rfc3339()
+        }))
     }
 
     /// Run portfolio snapshot job - capture daily portfolio performance for all users

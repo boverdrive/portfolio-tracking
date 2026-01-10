@@ -199,6 +199,44 @@ export async function convertCurrency(
 
 // ==================== Utility Functions ====================
 
+export function getEffectiveCurrency(tx: Transaction, defaultCurrency: string = 'THB'): string {
+    // Priority 0: Explicit trusted currency (NOT THB)
+    // If the user explicitly set EUR, JPY, etc., we trust it.
+    // We only inspect 'THB' suspiciously because it's the system default.
+    if (tx.currency && tx.currency !== 'THB') return tx.currency.toUpperCase();
+
+    // Priority 1: Market-based inference (strongest signal)
+    if (tx.market) {
+        const m = tx.market.toLowerCase();
+        // Global Crypto Exchanges typically trade in USDT/USDC pairs
+        if (['binance', 'okx', 'htx', 'kucoin', 'bybit', 'gate', 'mexc'].includes(m)) return 'USDT';
+        // US Markets / Global Markets typically trade in USD
+        if (['nyse', 'nasdaq', 'amex', 'coinbase', 'comex', 'lbma', 'forex'].includes(m)) return 'USD';
+        // Thai Markets typically trade in THB - Force return THB here and stop checking
+        if (['set', 'mai', 'tfex', 'bitkub'].includes(m)) return 'THB';
+    }
+
+    // Priority 2: Asset Type Intelligence (New!)
+    // If track record lacks market info but has asset_type, use it.
+    // Crypto defaults to USDT (standard for portfolio tracking)
+    if (tx.asset_type === 'crypto') return 'USDT';
+    // Foreign Stocks default to USD
+    if (tx.asset_type === 'foreign_stock') return 'USD';
+    // Gold defaults to USD (XAU/USD)
+    if (tx.asset_type === 'gold') return 'USD';
+
+    // Priority 3: Symbol-based inference (Fallback)
+    const sym = tx.symbol.toUpperCase();
+    const isCrypto = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'BNB', 'TRX', 'MATIC', 'DOT', 'LTC', 'BCH', 'XLM', 'ATOM', 'UNI', 'ALGO', 'NEAR', 'VET', 'FTM', 'SAND', 'MANA', 'AXS', 'FIL', 'ICP', 'EGLD', 'AAVE', 'LINK', 'SUSHI', 'CRV', 'COMP', 'MKR', 'SNX', 'YFI', '1INCH', 'GRT', 'RUNE', 'CAKE', 'BAKE', 'DOGE', 'SHIB', 'PEPE', 'FLOKI'].includes(sym);
+    if (isCrypto) return 'USDT';
+    if (['XAU', 'XAG', 'USDT', 'USDC', 'BUSD', 'DAI'].includes(sym)) return 'USD';
+
+    // Priority 4: Default fallback
+    if (tx.currency) return tx.currency.toUpperCase();
+
+    return defaultCurrency;
+}
+
 export function formatCurrency(
     amount: number,
     currency: string = 'THB'
@@ -425,4 +463,107 @@ export async function createSnapshotNow(): Promise<{ message: string; date: stri
     return fetchApi('/api/snapshots/now', {
         method: 'POST',
     });
+}
+
+// ==================== API Provider API ====================
+
+export interface ApiProvider {
+    id: string;
+    market_id: string;
+    provider_name: string;
+    provider_type: string;
+    api_url: string;
+    priority: number;
+    enabled: boolean;
+    timeout_ms: number;
+}
+
+export interface CreateApiProviderRequest {
+    market_id: string;
+    provider_name: string;
+    provider_type: string;
+    api_url?: string;
+    priority: number;
+    enabled?: boolean;
+    timeout_ms?: number;
+}
+
+export interface UpdateApiProviderRequest {
+    provider_name?: string;
+    provider_type?: string;
+    api_url?: string;
+    priority?: number;
+    enabled?: boolean;
+    timeout_ms?: number;
+}
+
+export interface ApiCallLog {
+    id: string;
+    provider_type: string;
+    market_id?: string;
+    symbol: string;
+    status: string;
+    response_time_ms: number;
+    price?: number;
+    currency?: string;
+    error_message?: string;
+    request_url?: string;
+    created: string;
+}
+
+export interface ApiCallStats {
+    provider_type: string;
+    total_calls: number;
+    success_count: number;
+    error_count: number;
+    success_rate: number;
+    avg_response_time_ms: number;
+}
+
+export async function getApiProviders(): Promise<ApiProvider[]> {
+    return fetchApi<ApiProvider[]>('/api/providers');
+}
+
+export async function getApiProvidersByMarket(marketId: string): Promise<ApiProvider[]> {
+    return fetchApi<ApiProvider[]>(`/api/providers/market/${marketId}`);
+}
+
+export async function createApiProvider(data: CreateApiProviderRequest): Promise<ApiProvider> {
+    return fetchApi<ApiProvider>('/api/providers', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateApiProvider(id: string, data: UpdateApiProviderRequest): Promise<ApiProvider> {
+    return fetchApi<ApiProvider>(`/api/providers/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteApiProvider(id: string): Promise<void> {
+    await fetchApi(`/api/providers/${id}`, {
+        method: 'DELETE',
+    });
+}
+
+export async function reorderApiProviders(marketId: string, providerIds: string[]): Promise<void> {
+    await fetchApi(`/api/providers/market/${marketId}/reorder`, {
+        method: 'PUT',
+        body: JSON.stringify({ provider_ids: providerIds }),
+    });
+}
+
+export async function getApiLogs(page: number = 1, perPage: number = 50): Promise<{
+    items: ApiCallLog[];
+    total: number;
+    page: number;
+    per_page: number;
+}> {
+    return fetchApi(`/api/logs?page=${page}&per_page=${perPage}`);
+}
+
+export async function getApiStats(): Promise<ApiCallStats[]> {
+    return fetchApi<ApiCallStats[]>('/api/logs/stats');
 }

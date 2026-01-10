@@ -1,28 +1,32 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { PortfolioAsset } from '@/types';
+import { PortfolioAsset, PortfolioResponse } from '@/types';
 import { formatCurrency, formatPercent, formatNumber, getAssetTypeName, getMarketName, DisplayCurrency } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
 import AssetLogo from '@/components/AssetLogo';
+import AssetDetailsModal from '@/components/AssetDetailsModal';
 
 interface Props {
     assets: PortfolioAsset[];
+    portfolio?: PortfolioResponse | null;
     isLoading?: boolean;
     displayCurrency?: DisplayCurrency;
+    convertToDisplayCurrency?: (value: number, fromCurrency?: string) => number;
+    onAssetSelect?: (asset: PortfolioAsset) => void;
 }
 
 type SortColumn = 'symbol' | 'quantity' | 'avg_cost' | 'current_price' | 'pnl';
 type SortDirection = 'asc' | 'desc';
 
-export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }: Props) {
+export default function AssetList({ assets, portfolio, isLoading, displayCurrency = 'THB', convertToDisplayCurrency, onAssetSelect }: Props) {
     const { t, settings } = useSettings();
     const [sortColumn, setSortColumn] = useState<SortColumn>('symbol');
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
     const formatValue = (value: number) => {
         if (displayCurrency === 'BTC') {
-            return `₿ ${value.toFixed(6)}`;
+            return `₿ ${value.toFixed(8)}`;
         }
         return formatCurrency(value, displayCurrency);
     };
@@ -133,7 +137,7 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
                 <SortableHeader column="quantity" label={t('จำนวน', 'Quantity')} className="flex-1 justify-end" />
                 <SortableHeader column="avg_cost" label={t('ต้นทุนเฉลี่ย', 'Avg Cost')} className="flex-1 justify-end" />
                 <SortableHeader column="current_price" label={t('ราคาปัจจุบัน', 'Current Price')} className="flex-1 justify-end" />
-                <SortableHeader column="pnl" label={t('กำไร/ขาดทุน', 'P&L')} className="flex-1 justify-end" />
+                <SortableHeader column="pnl" label={t('กำไร/ขาดทุน', 'P & L')} className="flex-1 justify-end" />
             </div>
 
             {/* Asset rows */}
@@ -149,8 +153,9 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
                     return (
                         <div
                             key={`${asset.asset_type}-${asset.market || ''}-${asset.symbol}`}
-                            className={`flex px-6 py-4 items-center transition-colors ${bgHover} ${closedOpacity}`}
+                            className={`flex px-6 py-4 items-center transition-colors cursor-pointer ${bgHover} ${closedOpacity}`}
                             style={{ animationDelay: `${index * 50}ms` }}
+                            onClick={() => onAssetSelect?.(asset)}
                         >
                             {/* Symbol */}
                             <div className="flex-1 flex items-center gap-3">
@@ -164,9 +169,21 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
                                             </span>
                                         )}
                                     </div>
-                                    <div className="text-xs text-gray-500">
-                                        {getAssetTypeName(asset.asset_type, settings.language)}
-                                        {asset.market && <span className="ml-1">• {getMarketName(asset.market, settings.language).split(' ')[0]}</span>}
+                                    <div className="text-xs text-gray-500 flex items-center gap-2">
+                                        <span>{getAssetTypeName(asset.asset_type, settings.language)}</span>
+                                        {asset.market && <span>• {getMarketName(asset.market, settings.language).split(' ')[0]}</span>}
+
+                                        {/* Position Type Badges */}
+                                        {asset.position_type === 'long' && (
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded uppercase font-medium">
+                                                Long {asset.leverage && asset.leverage > 1 ? `${asset.leverage}x` : ''}
+                                            </span>
+                                        )}
+                                        {asset.position_type === 'short' && (
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded uppercase font-medium">
+                                                Short {asset.leverage && asset.leverage > 1 ? `${asset.leverage}x` : ''}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -198,27 +215,34 @@ export default function AssetList({ assets, isLoading, displayCurrency = 'THB' }
 
                             {/* P&L */}
                             <div className="flex-1 text-right">
-                                {isClosed ? (
-                                    <>
-                                        {/* Closed position: show realized P&L */}
-                                        <div className={`font-semibold ${asset.realized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                            {formatValue(asset.realized_pnl)}
-                                        </div>
-                                        <div className="text-xs text-gray-500">
-                                            {t('กำไรที่รับรู้', 'Realized')}
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        {/* Active position: show unrealized P&L */}
-                                        <div className={`font-semibold ${pnlColor}`}>
-                                            {formatValue(asset.unrealized_pnl)}
-                                        </div>
-                                        <div className={`text-sm ${pnlColor}`}>
-                                            {formatPercent(asset.unrealized_pnl_percent)}
-                                        </div>
-                                    </>
-                                )}
+                                {(() => {
+                                    const netPnl = asset.unrealized_pnl + asset.realized_pnl;
+                                    const hasRealized = Math.abs(asset.realized_pnl) > 0.00000001;
+                                    const isPositive = netPnl >= 0;
+                                    const valueColor = isPositive ? 'text-emerald-400' : 'text-rose-400';
+
+                                    return (
+                                        <>
+                                            <div className={`font-semibold ${valueColor}`}>
+                                                {formatValue(netPnl)}
+                                            </div>
+                                            {isClosed ? (
+                                                <div className="text-xs text-gray-500">
+                                                    {t('กำไรที่รับรู้', 'Realized')}
+                                                </div>
+                                            ) : (
+                                                <div className={`text-sm ${asset.unrealized_pnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                                    {formatPercent(asset.unrealized_pnl_percent)}
+                                                    {hasRealized && (
+                                                        <span className="text-gray-500 text-xs ml-1" title={t('รวมกำไรที่รับรู้แล้ว', 'Includes Realized')}>
+                                                            (Net)
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </>
+                                    );
+                                })()}
                             </div>
                         </div>
                     );

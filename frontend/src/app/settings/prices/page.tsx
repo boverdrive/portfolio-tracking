@@ -42,6 +42,7 @@ export default function PricesSettingsPage() {
         currency: 'THB',
         market: ''
     });
+    const [refreshing, setRefreshing] = useState(false);
 
     const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || 'http://localhost:8090';
 
@@ -166,6 +167,44 @@ export default function PricesSettingsPage() {
         setTimeout(() => setMessage(null), 3000);
     };
 
+    const handleRefreshAll = async () => {
+        setRefreshing(true);
+        try {
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            const jobsResponse = await fetch(`${API_URL}/api/jobs`);
+            if (!jobsResponse.ok) throw new Error('Failed to fetch jobs');
+
+            const jobsData = await jobsResponse.json();
+            const priceJob = jobsData.jobs?.find((j: any) => j.job_type === 'price_fetch');
+
+            if (!priceJob) {
+                setMessage({ type: 'error', text: t('ไม่พบ Job สำหรับดึงราคา', 'Price fetch job not found') });
+                return;
+            }
+
+            const runResponse = await fetch(`${API_URL}/api/jobs/${priceJob.id}/run`, {
+                method: 'POST'
+            });
+
+            if (runResponse.ok) {
+                setMessage({ type: 'success', text: t('เริ่มการดึงราคาล่าสุดแล้ว', 'Started fetching latest prices') });
+                setTimeout(() => {
+                    fetchPrices();
+                }, 2000);
+            } else {
+                setMessage({ type: 'error', text: t('ไม่สามารถรัน Job ได้', 'Failed to start job') });
+            }
+        } catch (error) {
+            console.error('Refresh error:', error);
+            setMessage({ type: 'error', text: t('เกิดข้อผิดพลาดในการ Refresh', 'Failed to refresh prices') });
+        } finally {
+            setRefreshing(false);
+            setTimeout(() => setMessage(null), 3000);
+        }
+    };
+
+
+
     // Sort toggle handler
     const handleSort = (column: SortColumn) => {
         if (sortColumn === column) {
@@ -284,15 +323,27 @@ export default function PricesSettingsPage() {
                             <p className="text-gray-400 text-sm">{t('แก้ไขและตั้งราคาด้วยตนเอง', 'Manually edit and set prices')}</p>
                         </div>
                     </div>
-                    <button
-                        onClick={() => setShowAddForm(!showAddForm)}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
-                        {t('เพิ่มราคาใหม่', 'Add New Price')}
-                    </button>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={handleRefreshAll}
+                            disabled={refreshing}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white rounded-lg transition-colors"
+                        >
+                            <svg className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            {refreshing ? t('กำลังดึงข้อมูล...', 'Fetching...') : t('ดึงราคาล่าสุด', 'Refresh Prices')}
+                        </button>
+                        <button
+                            onClick={() => setShowAddForm(!showAddForm)}
+                            className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            {t('เพิ่มราคาใหม่', 'Add New Price')}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Message */}

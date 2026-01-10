@@ -1,7 +1,7 @@
 'use client';
 
 import { Transaction, PortfolioResponse } from '@/types';
-import { formatCurrency, formatNumber, getAssetTypeName, DisplayCurrency, formatPercent } from '@/lib/api';
+import { formatCurrency, formatNumber, getAssetTypeName, DisplayCurrency, formatPercent, getEffectiveCurrency } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
 import AssetLogo from '@/components/AssetLogo';
 
@@ -13,9 +13,10 @@ interface Props {
     onEdit?: (transaction: Transaction) => void;
     displayCurrency?: DisplayCurrency;
     convertToDisplayCurrency?: (value: number, fromCurrency?: string) => number;
+    transactionMetrics?: Record<string, { realizedPnl?: number, unrealizedPnl?: number, remainingQty?: number }>;
 }
 
-export default function TransactionList({ transactions, portfolio, isLoading, onDelete, onEdit, displayCurrency = 'THB', convertToDisplayCurrency }: Props) {
+export default function TransactionList({ transactions, portfolio, isLoading, onDelete, onEdit, displayCurrency = 'THB', convertToDisplayCurrency, transactionMetrics }: Props) {
     const { t, settings } = useSettings();
 
     if (isLoading) {
@@ -61,55 +62,65 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
             {transactions.map((tx, index) => {
                 // Check if it's a "positive" action (buy/long) or "negative" action (sell/short/close)
                 const isPositive = tx.action === 'buy' || tx.action === 'long';
-                const multiplier = tx.leverage || 1;
-                const totalValue = tx.quantity * tx.price * multiplier;
+                // For TFEX, leverage = contract multiplier (affects value). For Crypto, it's just financial leverage.
+                const valueMultiplier = (tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
+                const displayLeverage = tx.leverage || 1;
+                // Determine effective currency (handle cases where API returns 'THB' for USDT pairs)
+                const effectiveTxCurrency = getEffectiveCurrency(tx, 'THB');
+                const totalValue = tx.quantity * tx.price * valueMultiplier;
 
                 // P&L Calculation logic
                 let pnl = 0;
                 let pnlPercent = 0;
                 let showPnl = false;
+                let isRealized = false;
 
-                if (portfolio && (tx.action === 'buy' || tx.action === 'long' || tx.action === 'short')) {
-                    const asset = portfolio.assets.find(a => a.symbol === tx.symbol);
+                // Priority 1: Use pre-calculated metrics if available (FIFO/Match logic)
+                if (transactionMetrics && transactionMetrics[tx.id]) {
+                    const metrics = transactionMetrics[tx.id];
+                    const isOpening = tx.action === 'buy' || tx.action === 'long' || tx.action === 'short';
+                    const isClosing = tx.action === 'sell' || tx.action === 'close_long' || tx.action === 'close_short';
 
-                    // Get current price from portfolio assets or fallback to assetPrices prop
-                    let currentPriceVal = 0;
-                    let assetCurrency = tx.currency || 'THB';
+                    if (isClosing) {
+                        // Closing actions = Realized P&L
+                        pnl = metrics.realizedPnl || 0;
+                        isRealized = true;
 
-                    if (asset) {
-                        assetCurrency = asset.currency;
-                        currentPriceVal = convertToDisplayCurrency
-                            ? convertToDisplayCurrency(asset.current_price, asset.currency)
-                            : asset.current_price;
-                    } else if ((portfolio as any).assetPrices) {
-                        // Fallback to assetPrices if available
-                        const priceRecord = (portfolio as any).assetPrices.find((p: any) => p.symbol === tx.symbol);
-                        if (priceRecord) {
-                            assetCurrency = priceRecord.currency;
-                            currentPriceVal = convertToDisplayCurrency
-                                ? convertToDisplayCurrency(priceRecord.price, priceRecord.currency)
-                                : priceRecord.price;
+                        // Cost Basis for closing = Value - PnL
+                        const costBasis = totalValue - pnl;
+                        pnlPercent = costBasis !== 0 ? (pnl / costBasis) * 100 : 0;
+                        showPnl = true;
+                    } else if (isOpening && metrics.remainingQty && metrics.remainingQty > 0) {
+                        // Open positions = Unrealized P&L
+                        pnl = metrics.unrealizedPnl || 0;
+                        isRealized = false;
+
+                        // Cost basis of the remaining part
+                        // Cost basis of the remaining part in Display Currency
+                        const itemPrice = convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price;
+                        const remainingCost = metrics.remainingQty * itemPrice * valueMultiplier;
+
+                        // Pnl is in Base Currency (THB), convert to Display Currency for consistent ratio
+                        const pnlInDisplay = convertToDisplayCurrency ? convertToDisplayCurrency(pnl, 'THB') : pnl;
+
+                        let rawPercent = remainingCost !== 0 ? (pnlInDisplay / remainingCost) * 100 : 0;
+
+                        // For Crypto, if there is leverage, show ROE (Return on Equity) approximation
+                        if (tx.asset_type === 'crypto' && displayLeverage > 1) {
+                            rawPercent *= displayLeverage;
                         }
-                    }
 
-                    if (currentPriceVal > 0) {
-                        const txPriceVal = convertToDisplayCurrency
-                            ? convertToDisplayCurrency(tx.price, tx.currency)
-                            : tx.price;
-
-                        const entryTotal = tx.quantity * txPriceVal * multiplier;
-                        const currentTotal = tx.quantity * currentPriceVal * multiplier;
-
-                        if (tx.action === 'short') {
-                            pnl = entryTotal - currentTotal;
-                        } else {
-                            pnl = currentTotal - entryTotal;
-                        }
-
-                        pnlPercent = entryTotal !== 0 ? (pnl / entryTotal) * 100 : 0;
+                        pnlPercent = rawPercent;
                         showPnl = true;
                     }
                 }
+                // Priority 2: Legacy/Global calculation (Only for fully held portfolios or simple view?)
+                // DISABLED as requested by user to avoid confusion on mixed histories
+                /*
+                else if (portfolio && (tx.action === 'buy' || tx.action === 'long' || tx.action === 'short')) {
+                   // ... (kept disabled)
+                }
+                */
 
                 // Get action label and color
                 const getActionDisplay = () => {
@@ -154,13 +165,37 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                                 </div>
                                 <div className="text-sm text-gray-400">
                                     {tx.quantity.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 8 })} × {formatCurrency(
-                                        convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, tx.currency) : tx.price,
+                                        convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price,
                                         displayCurrency
                                     )}
-                                    {multiplier > 1 && (
-                                        <span className="text-amber-400 ml-1">(×{multiplier})</span>
+                                    {displayLeverage > 1 && (
+                                        <span className="text-amber-400 ml-1">(×{displayLeverage})</span>
                                     )}
                                 </div>
+                                {(() => {
+                                    const asset = portfolio?.assets.find(a => a.symbol === tx.symbol && a.asset_type === tx.asset_type);
+                                    if (asset?.current_price && (isPositive || (transactionMetrics?.[tx.id]?.remainingQty || 0) > 0)) {
+                                        const entryPrice = convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price;
+                                        const currentPrice = convertToDisplayCurrency ? convertToDisplayCurrency(asset.current_price, asset.currency) : asset.current_price;
+
+                                        const currentVal = tx.quantity * currentPrice * valueMultiplier; // Use converted current price for value calc? 
+                                        // No, currentVal logic below uses asset.currency, let's keep it consistent.
+                                        // Wait, currentVal block is separate (lines 195+). This block is for Entry/Current labels.
+
+                                        return (
+                                            <div className="flex flex-wrap gap-2 text-xs mt-1 font-medium">
+                                                <span className="text-gray-400">
+                                                    {t('ทุน', 'Entry')}: <span className="text-gray-300">{formatCurrency(entryPrice, displayCurrency)}</span>
+                                                </span>
+                                                <span className="text-gray-600">•</span>
+                                                <span className="text-blue-400">
+                                                    {t('ราคาปัจจุบัน', 'Current')}: {formatCurrency(currentPrice, displayCurrency)}
+                                                </span>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                                 <div className="text-xs text-gray-500 mt-1">
                                     {formatDate(tx.timestamp)}
                                 </div>
@@ -170,13 +205,28 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                             <div className="text-right">
                                 <div className="font-mono text-white font-medium">
                                     {convertToDisplayCurrency
-                                        ? formatCurrency(convertToDisplayCurrency(totalValue, tx.currency), displayCurrency)
-                                        : formatCurrency(totalValue, tx.currency || 'THB')
+                                        ? formatCurrency(convertToDisplayCurrency(totalValue, effectiveTxCurrency), displayCurrency)
+                                        : formatCurrency(totalValue, effectiveTxCurrency || 'THB')
                                     }
                                 </div>
+                                {(() => {
+                                    const asset = portfolio?.assets.find(a => a.symbol === tx.symbol && a.asset_type === tx.asset_type);
+                                    if (asset?.current_price && (isPositive || (transactionMetrics?.[tx.id]?.remainingQty || 0) > 0)) {
+                                        const currentVal = tx.quantity * asset.current_price * valueMultiplier;
+                                        return (
+                                            <div className="text-xs text-blue-400 font-medium leading-none mb-1">
+                                                {convertToDisplayCurrency
+                                                    ? formatCurrency(convertToDisplayCurrency(currentVal, asset.currency), displayCurrency)
+                                                    : formatCurrency(currentVal, asset.currency || 'THB')
+                                                }
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                                 {showPnl ? (
                                     <div className={`text-xs font-medium ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                        {pnl >= 0 ? '+' : ''}{convertToDisplayCurrency ? formatCurrency(pnl, displayCurrency) : formatCurrency(pnl, 'THB')} ({formatPercent(pnlPercent)})
+                                        {pnl >= 0 ? '+' : ''}{convertToDisplayCurrency ? formatCurrency(convertToDisplayCurrency(pnl, 'THB'), displayCurrency) : formatCurrency(pnl, 'THB')} ({formatPercent(pnlPercent)})
                                     </div>
                                 ) : (
                                     tx.fees > 0 && (

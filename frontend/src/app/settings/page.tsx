@@ -831,7 +831,244 @@ function ExchangeRateSettings() {
     );
 }
 
-type SettingsSection = 'general' | 'language' | 'currency' | 'assets' | 'markets' | 'exchange' | 'prices' | 'jobs' | 'system';
+// ==================== API Logs Settings ====================
+function ApiLogsSettings() {
+    const { t } = useSettings();
+    const [logs, setLogs] = useState<Array<{
+        id: string;
+        provider_type: string;
+        symbol: string;
+        status: string;
+        response_time_ms: number;
+        price?: number;
+        currency?: string;
+        error_message?: string;
+        request_url?: string;
+        created: string;
+    }>>([]);
+    const [stats, setStats] = useState<Array<{
+        provider_type: string;
+        total_calls: number;
+        success_count: number;
+        error_count: number;
+        success_rate: number;
+        avg_response_time_ms: number;
+    }>>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [page, setPage] = useState(1);
+    const [limit, setLimit] = useState(50);
+    const [total, setTotal] = useState(0);
+    const [selectedLog, setSelectedLog] = useState<any>(null);
+
+    const fetchLogs = async () => {
+        setIsLoading(true);
+        try {
+            const { getApiLogs, getApiStats } = await import('@/lib/api');
+            const [logsData, statsData] = await Promise.all([
+                getApiLogs(page, limit),
+                getApiStats()
+            ]);
+            setLogs(logsData.items);
+            setTotal(logsData.total);
+            setStats(statsData);
+        } catch (err) {
+            console.error('Failed to fetch API logs:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchLogs();
+    }, [page, limit]);
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                    📊 {t('API Logs', 'API Logs')}
+                </h3>
+                <div className="flex items-center gap-2">
+                    <select
+                        value={limit}
+                        onChange={(e) => {
+                            setLimit(Number(e.target.value));
+                            setPage(1);
+                        }}
+                        className="bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block px-2.5 py-1.5"
+                    >
+                        <option value={20}>20 / page</option>
+                        <option value={50}>50 / page</option>
+                        <option value={100}>100 / page</option>
+                    </select>
+                    <button
+                        onClick={fetchLogs}
+                        disabled={isLoading}
+                        className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg text-blue-400 text-sm transition-all flex items-center gap-1"
+                    >
+                        {isLoading ? '⏳' : '🔄'} {t('รีเฟรช', 'Refresh')}
+                    </button>
+                </div>
+            </div>
+
+            {/* Stats Summary */}
+            {stats.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {stats.map((stat) => (
+                        <div key={stat.provider_type} className="bg-gray-800/50 rounded-lg p-3 border border-gray-700/50">
+                            <div className="text-sm text-gray-400 mb-1">{stat.provider_type}</div>
+                            <div className="text-white font-medium">{stat.total_calls} {t('calls', 'calls')}</div>
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className={`text-xs ${stat.success_rate >= 90 ? 'text-emerald-400' : stat.success_rate >= 70 ? 'text-yellow-400' : 'text-rose-400'}`}>
+                                    {stat.success_rate.toFixed(1)}% ✓
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                    ~{stat.avg_response_time_ms.toFixed(0)}ms
+                                </span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Logs Table */}
+            <div className="bg-gray-800/50 rounded-lg border border-gray-700/50 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="bg-gray-700/30">
+                                <th className="px-3 py-2 text-left text-gray-400 font-medium">{t('เวลา', 'Time')}</th>
+                                <th className="px-3 py-2 text-left text-gray-400 font-medium">Provider</th>
+                                <th className="px-3 py-2 text-left text-gray-400 font-medium">Symbol</th>
+                                <th className="px-3 py-2 text-left text-gray-400 font-medium">Status</th>
+                                <th className="px-3 py-2 text-left text-gray-400 font-medium">Price</th>
+                                <th className="px-3 py-2 text-left text-gray-400 font-medium">Time</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700/30">
+                            {logs.map((log) => (
+                                <tr
+                                    key={log.id}
+                                    onClick={() => setSelectedLog(log)}
+                                    className="hover:bg-gray-700/20 cursor-pointer transition-colors"
+                                >
+                                    <td className="px-3 py-2 text-gray-300 text-xs whitespace-nowrap">
+                                        {new Date(log.created).toLocaleString()}
+                                    </td>
+                                    <td className="px-3 py-2 text-white">{log.provider_type}</td>
+                                    <td className="px-3 py-2 text-white font-mono">{log.symbol}</td>
+                                    <td className="px-3 py-2">
+                                        <span className={`px-1.5 py-0.5 rounded text-xs ${log.status === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                            {log.status}
+                                        </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-gray-300">
+                                        {log.price ? `${log.price.toLocaleString()} ${log.currency || ''}` : '-'}
+                                    </td>
+                                    <td className="px-3 py-2 text-gray-400">{log.response_time_ms}ms</td>
+                                </tr>
+                            ))}
+                            {logs.length === 0 && !isLoading && (
+                                <tr>
+                                    <td colSpan={6} className="px-3 py-8 text-center text-gray-500">
+                                        {t('ไม่มีข้อมูล', 'No logs yet')}
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Pagination */}
+                {total > limit && (
+                    <div className="px-3 py-2 border-t border-gray-700/50 flex items-center justify-between">
+                        <span className="text-sm text-gray-500">
+                            {t('หน้า', 'Page')} {page} / {Math.ceil(total / limit)}
+                        </span>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                disabled={page === 1}
+                                className="px-2 py-1 text-sm bg-gray-700/50 rounded disabled:opacity-50 hover:bg-gray-600/50 text-gray-300"
+                            >
+                                ←
+                            </button>
+                            <button
+                                onClick={() => setPage(p => p + 1)}
+                                disabled={page >= Math.ceil(total / limit)}
+                                className="px-2 py-1 text-sm bg-gray-700/50 rounded disabled:opacity-50 hover:bg-gray-600/50 text-gray-300"
+                            >
+                                →
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Log Details Modal */}
+            {selectedLog && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedLog(null)}>
+                    <div className="bg-gray-800 rounded-xl border border-gray-700 shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between bg-gray-900/50">
+                            <h3 className="text-lg font-semibold text-white">Log Details</h3>
+                            <button onClick={() => setSelectedLog(null)} className="text-gray-400 hover:text-white">✕</button>
+                        </div>
+                        <div className="p-6 overflow-y-auto space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase">Timestamp</label>
+                                    <div className="text-gray-300">{new Date(selectedLog.created).toLocaleString()}</div>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase">Provider</label>
+                                    <div className="text-white font-medium">{selectedLog.provider_type}</div>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase">Symbol</label>
+                                    <div className="text-white font-mono">{selectedLog.symbol}</div>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase">Status</label>
+                                    <div>
+                                        <span className={`px-2 py-0.5 rounded text-sm ${selectedLog.status === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                            {selectedLog.status}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase">Duration</label>
+                                    <div className="text-gray-300">{selectedLog.response_time_ms}ms</div>
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase">Price</label>
+                                    <div className="text-gray-300">{selectedLog.price ? `${selectedLog.price} ${selectedLog.currency || ''}` : '-'}</div>
+                                </div>
+                            </div>
+
+                            {selectedLog.error_message && (
+                                <div className="bg-rose-900/20 border border-rose-900/50 rounded-lg p-3">
+                                    <label className="text-xs text-rose-400 uppercase font-semibold">Error Message</label>
+                                    <pre className="text-rose-300 text-sm whitespace-pre-wrap mt-1 font-mono">{selectedLog.error_message}</pre>
+                                </div>
+                            )}
+
+                            {selectedLog.request_url && (
+                                <div>
+                                    <label className="text-xs text-gray-500 uppercase">Request URL</label>
+                                    <div className="bg-gray-900 rounded p-2 text-xs text-gray-400 font-mono break-all mt-1">
+                                        {selectedLog.request_url}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+type SettingsSection = 'general' | 'language' | 'currency' | 'assets' | 'markets' | 'exchange' | 'prices' | 'jobs' | 'api_logs' | 'system';
 
 export default function SettingsPage() {
     const { t } = useSettings();
@@ -847,6 +1084,7 @@ export default function SettingsPage() {
         { id: 'exchange', label: t('อัตราแลกเปลี่ยน', 'Exchange Rates'), icon: '💱', description: t('ดูอัตราแลกเปลี่ยนปัจจุบัน', 'View current exchange rates') },
         { id: 'prices', label: t('จัดการราคา', 'Manage Prices'), icon: '📈', description: t('ดูและจัดการราคาสินทรัพย์', 'View and manage asset prices'), isLink: true, href: '/settings/prices' },
         { id: 'jobs', label: t('Background Jobs', 'Background Jobs'), icon: '🔄', description: t('ตั้งเวลาดึงข้อมูลอัตโนมัติ', 'Schedule automatic data fetching'), isLink: true, href: '/settings/jobs' },
+        { id: 'api_logs', label: t('API Logs', 'API Logs'), icon: '📊', description: t('ดูบันทึกการเรียก API', 'View API call logs') },
         { id: 'system', label: t('ระบบ', 'System'), icon: '🔧', description: t('ตั้งค่าระบบและ Seed Data', 'System settings & seed data') },
     ];
 
@@ -864,6 +1102,8 @@ export default function SettingsPage() {
                 return <MarketSettings />;
             case 'exchange':
                 return <ExchangeRateSettings />;
+            case 'api_logs':
+                return <ApiLogsSettings />;
             case 'system':
                 return (
                     <>

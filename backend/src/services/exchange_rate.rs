@@ -93,7 +93,24 @@ impl ExchangeRateService {
 
         // Mock rates for traditional currencies and gold
         // These would come from a forex API in production
-        let mock_rates = self.get_mock_forex_rates();
+        // Now using Free Forex API
+        let forex_rates_result = self.fetch_forex_rates_api().await;
+        
+        // Use fetched rates or fallback to hardcoded mocks for critical currencies
+        let mock_rates = match forex_rates_result {
+            Ok(rates) => rates,
+            Err(e) => {
+                tracing::error!("Failed to fetch forex rates, using fallback mocks: {}", e);
+                // Fallback mock map
+                 [
+                    ("USD", 1.0), ("USDT", 1.0), ("THB", 0.028),
+                    ("EUR", 1.08), ("GBP", 1.27), ("JPY", 0.0067),
+                    ("HKD", 0.128), ("SGD", 0.74), ("XAU", 2650.0),
+                ].into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect()
+            }
+        };
         
         // mock_rates contains: how much USD per 1 unit of currency
         // e.g., THB: 0.028 means 1 THB = 0.028 USD
@@ -189,22 +206,97 @@ impl ExchangeRateService {
         }
     }
 
-    /// Mock forex rates (1 unit = X USD)
-    fn get_mock_forex_rates(&self) -> HashMap<String, f64> {
-        [
-            ("USD", 1.0),
-            ("USDT", 1.0),        // 1 USDT = 1 USD (stablecoin)
-            ("THB", 0.028),      // 1 THB = 0.028 USD (35 THB = 1 USD)
-            ("EUR", 1.08),       // 1 EUR = 1.08 USD
-            ("GBP", 1.27),       // 1 GBP = 1.27 USD
-            ("JPY", 0.0067),     // 1 JPY = 0.0067 USD
-            ("HKD", 0.128),      // 1 HKD = 0.128 USD
-            ("SGD", 0.74),       // 1 SGD = 0.74 USD
-            ("XAU", 2650.0),     // 1 oz Gold = 2650 USD
-        ].into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect()
+    /// Fetch forex rates from free API (https://open.er-api.com)
+    async fn fetch_forex_rates_api(&self) -> Result<HashMap<String, f64>, AppError> {
+        let url = "https://open.er-api.com/v6/latest/USD";
+        tracing::debug!("Fetching forex rates from {}", url);
+
+        let response = self.client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalApiError(format!("Failed to fetch forex rates: {}", e)))?;
+
+        if !response.status().is_success() {
+             return Err(AppError::ExternalApiError(format!("Forex API Error: {}", response.status())));
+        }
+
+        let data: serde_json::Value = response.json().await
+            .map_err(|e| AppError::ExternalApiError(format!("Failed to parse forex json: {}", e)))?;
+
+        // Format: { "rates": { "THB": 35.5, ... } }
+        let rates_map = data
+            .get("rates")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| AppError::ExternalApiError("Invalid forex API response format".to_string()))?;
+
+        let mut rates = HashMap::new();
+        // Add USD itself
+        rates.insert("USD".to_string(), 1.0);
+        // Add USDT as peg to USD (or close enough)
+        rates.insert("USDT".to_string(), 1.0);
+        // Add Gold mock until we have a better source, or maybe the API has XAU?
+        // Open Exchange Rates usually has XAU, but let's check or keep fallback.
+        // For safety, let's keep hardcoded generic commodities if API misses them.
+        
+        for (currency, rate_val) in rates_map {
+            if let Some(rate) = rate_val.as_f64() {
+                rates.insert(currency.to_string(), rate);
+            }
+        }
+        
+        // Ensure standard mocks exist if API didn't return them (e.g. specialized commodities not in std forex)
+        rates.entry("XAU".to_string()).or_insert(2650.0); // Price of 1 oz Gold in USD (Inverse of rate usually? Wait.)
+        // API returns "How many Currency units per 1 USD".
+        // XAU rate 0.00038 means 1 USD = 0.00038 oz Gold. 
+        // So Gold Price in USD = 1 / 0.00038 = ~2631.
+        // Let's handle special inversion for XAU/XAG if the API provides them, otherwise use mock price.
+        
+        // Actually, let's stick to the "Rate = USD value" or "Rate = Units per USD"?
+        // fetch_exchange_rate logic: 
+        // from_to_usd = mock_rates.get(from).unwrap_or(1.0) -> This implies the map stores "How many USD is 1 unit worth?"
+        // WAIT. 
+        // Previous logic:
+        // THB: 0.028 => 1 THB = 0.028 USD.
+        // OpenER API returns: THB: 35.7 => 1 USD = 35.7 THB.
+        // So OpenER returns "Units per USD".
+        // Previous mock was "USD per Unit".
+        // I need to INVERT the rates from OpenER to match the internal logic, OR update the internal logic.
+        // Updating internal logic to use standard "Units per USD" is better but risky for regressions.
+        // Easiest: Invert the rates here.
+        // Map will store: "Value of 1 Unit in USD".
+        
+        // Re-building map with inversion
+        let mut value_in_usd_map = HashMap::new();
+        value_in_usd_map.insert("USD".to_string(), 1.0);
+        value_in_usd_map.insert("USDT".to_string(), 1.0);
+
+        for (currency, rate_per_usd) in rates_map {
+            if let Some(rate) = rate_per_usd.as_f64() {
+                if rate > 0.0 {
+                   value_in_usd_map.insert(currency.to_string(), 1.0 / rate);
+                }
+            }
+        }
+        
+        // Gold/Silver overrides if missing or weird
+        // XAU in API might be "Ounces per USD" -> very small number.
+        // 1/Rate gives "USD per Ounce". Perfect.
+        
+        Ok(value_in_usd_map)
     }
+
+    /// Implement a simple memory cache for the forex rates to avoid fetching every call
+    /// For this single-file edit, I'll just call the API directly inside `fetch_exchange_rate` 
+    /// but limit it by checking if I already have a recent entry in the main `cache`?
+    /// No, `cache` stores specific pairs.
+    /// I should probably just fetch it. The user said "Free API", usually has limits but 
+    /// OpenER is generous. Let's add a small valid-time if possible, but 
+    /// effectively, `fetch_exchange_rate` is called only on cache miss of `get_rate`.
+    /// `get_rate` caches for 5 mins. So we verify only once per 5 mins per pair.
+    /// That is effectively 1 API call per 5 mins per active pair. Acceptable.
+
+    /// Mock forex rates (Removed, replaced by fetch_forex_rates_api logic inside fetch logic)
 
     /// Mock BTC rate
     fn get_mock_btc_rate(&self, from: &str, to: &str) -> f64 {

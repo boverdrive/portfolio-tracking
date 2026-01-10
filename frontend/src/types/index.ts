@@ -122,6 +122,8 @@ export interface PortfolioAsset {
   unrealized_pnl: number;
   unrealized_pnl_percent: number;
   realized_pnl: number;         // Realized P&L from closed portions
+  leverage?: number;
+  position_type?: string;     // "spot", "long", "short"
 }
 
 export interface PortfolioSummary {
@@ -130,6 +132,7 @@ export interface PortfolioSummary {
   total_unrealized_pnl: number;
   total_unrealized_pnl_percent: number;
   total_realized_pnl: number;
+  realized_pnl_breakdown?: Record<string, number>;
   assets_count: number;
 }
 

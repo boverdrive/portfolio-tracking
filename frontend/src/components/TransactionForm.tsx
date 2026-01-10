@@ -110,6 +110,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
         return '';
     });
     const [orderAmountStr, setOrderAmountStr] = useState('');
+    const [inputMode, setInputMode] = useState<'quantity' | 'total'>('quantity');
 
     const [formData, setFormData] = useState<CreateTransactionRequest>(() => {
         if (editTransaction) {
@@ -432,6 +433,41 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
         }
     };
 
+    // Helper to fetch latest price
+    const fetchLatestPrice = async () => {
+        if (!formData.symbol) return null;
+        setIsFetchingPrice(true);
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+            const marketParam = formData.market ? `&market=${formData.market}` : '';
+            const response = await fetch(
+                `${apiUrl}/api/prices/${encodeURIComponent(formData.symbol)}?asset_type=${formData.asset_type}${marketParam}`
+            );
+            if (response.ok) {
+                const data = await response.json();
+                if (data.price) {
+                    setPriceStr(String(data.price));
+                    setFormData(prev => ({
+                        ...prev,
+                        price: data.price,
+                        // Preserve USDT if fetched currency is USD (assume 1:1 for input convenience)
+                        currency: (prev.currency === 'USDT' && data.currency === 'USD')
+                            ? 'USDT'
+                            : (data.currency || prev.currency)
+                    }));
+                    return data;
+                }
+            } else {
+                console.error('Failed to fetch price');
+            }
+        } catch (error) {
+            console.error('Error fetching price:', error);
+        } finally {
+            setIsFetchingPrice(false);
+        }
+        return null;
+    };
+
     const assetTypes: AssetType[] = ['stock', 'foreign_stock', 'crypto', 'gold', 'tfex', 'commodity'];
 
     const getSymbolPlaceholder = (): string => {
@@ -517,6 +553,71 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                         </select>
                     </div>
                 )}
+
+                {/* Symbol (Moved to top) */}
+                <div className="relative">
+                    <label className="block text-sm font-medium text-gray-400 mb-2">{t('สัญลักษณ์', 'Symbol')}</label>
+                    <input
+                        ref={symbolInputRef}
+                        type="text"
+                        value={formData.symbol}
+                        onChange={(e) => handleSymbolChange(e.target.value)}
+                        onFocus={() => {
+                            if ((formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock') && formData.symbol.length >= 1) {
+                                fetchSymbolSuggestions(formData.symbol);
+                            }
+                        }}
+                        placeholder={getSymbolPlaceholder()}
+                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                        autoComplete="off"
+                    />
+
+                    {/* Autocomplete Dropdown */}
+                    {showSuggestions && (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock') && (
+                        <div
+                            ref={suggestionsRef}
+                            className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto"
+                        >
+                            {isLoadingSuggestions ? (
+                                <div className="px-4 py-3 text-gray-400 text-sm flex items-center gap-2">
+                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    {t('กำลังค้นหา...', 'Searching...')}
+                                </div>
+                            ) : symbolSuggestions.length > 0 ? (
+                                symbolSuggestions.map((suggestion) => (
+                                    <button
+                                        key={suggestion.symbol}
+                                        type="button"
+                                        onClick={() => handleSelectSuggestion(suggestion)}
+                                        className="w-full px-4 py-2 text-left hover:bg-gray-700/50 transition-colors flex items-center justify-between group"
+                                    >
+                                        <div>
+                                            <span className="text-white font-medium">{suggestion.symbol}</span>
+                                            <span className="text-gray-400 text-sm ml-2">{suggestion.name}</span>
+                                        </div>
+                                        <span className="text-xs text-gray-500 group-hover:text-gray-400">
+                                            {'market' in suggestion ? suggestion.market : ('contract_type' in suggestion ? (suggestion as TfexSymbol).contract_type : '')}
+                                        </span>
+                                    </button>
+                                ))
+                            ) : (
+                                <div className="px-4 py-3 text-gray-400 text-sm">
+                                    {t('ไม่พบผลลัพธ์', 'No results found')}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Display selected symbol name */}
+                    {formData.symbol_name && (
+                        <div className="mt-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                            <span className="text-emerald-400 text-sm">{formData.symbol_name}</span>
+                        </div>
+                    )}
+                </div>
 
                 {/* TFEX Contract Multiplier - Editable */}
                 {formData.asset_type === 'tfex' && formData.symbol && (
@@ -612,55 +713,8 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                             </div>
                         )}
 
-                        {/* Order Amount - Auto calculate quantity */}
-                        {isFuturesMode && (
-                            <div>
-                                <label className="block text-xs text-gray-400 mb-2">
-                                    {t('มูลค่าออเดอร์', 'Order Amount')}
-                                    <span className="text-gray-500 ml-1">(Position Size)</span>
-                                </label>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        value={orderAmountStr}
-                                        onChange={(e) => {
-                                            const val = e.target.value;
-                                            if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                                                setOrderAmountStr(val);
-                                                // Auto calculate quantity = orderAmount / price
-                                                const amount = parseFloat(val);
-                                                if (!isNaN(amount) && formData.price > 0) {
-                                                    const qty = amount / formData.price;
-                                                    setQuantityStr(qty.toFixed(8));
-                                                    setFormData(prev => ({ ...prev, quantity: qty }));
-                                                }
-                                            }
-                                        }}
-                                        placeholder="117.27"
-                                        className="flex-1 px-3 py-2 text-sm bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 font-mono"
-                                    />
-                                    <span className="text-gray-400 text-sm">{formData.currency || 'USD'}</span>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            // Calculate from current quantity and price
-                                            if (formData.quantity > 0 && formData.price > 0) {
-                                                const amount = formData.quantity * formData.price;
-                                                setOrderAmountStr(amount.toFixed(2));
-                                            }
-                                        }}
-                                        className="px-2 py-2 text-xs bg-gray-600 hover:bg-gray-500 rounded-lg text-gray-300 transition-all"
-                                        title={t('คำนวณจาก Quantity', 'Calculate from Quantity')}
-                                    >
-                                        ⟲
-                                    </button>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    {t('Quantity = Order Amount ÷ Price', 'Quantity = Order Amount ÷ Price')}
-                                </p>
-                            </div>
-                        )}
+
+
                     </div>
                 )}
 
@@ -691,95 +745,90 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     </div>
                 </div>
 
-                {/* Symbol */}
-                <div className="relative">
-                    <label className="block text-sm font-medium text-gray-400 mb-2">{t('สัญลักษณ์', 'Symbol')}</label>
-                    <input
-                        ref={symbolInputRef}
-                        type="text"
-                        value={formData.symbol}
-                        onChange={(e) => handleSymbolChange(e.target.value)}
-                        onFocus={() => {
-                            if ((formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock') && formData.symbol.length >= 1) {
-                                fetchSymbolSuggestions(formData.symbol);
-                            }
-                        }}
-                        placeholder={getSymbolPlaceholder()}
-                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
-                        autoComplete="off"
-                    />
 
-                    {/* Autocomplete Dropdown */}
-                    {showSuggestions && (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock') && (
-                        <div
-                            ref={suggestionsRef}
-                            className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto"
-                        >
-                            {isLoadingSuggestions ? (
-                                <div className="px-4 py-3 text-gray-400 text-sm flex items-center gap-2">
-                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                    </svg>
-                                    {t('กำลังค้นหา...', 'Searching...')}
-                                </div>
-                            ) : symbolSuggestions.length > 0 ? (
-                                symbolSuggestions.map((suggestion) => (
-                                    <button
-                                        key={suggestion.symbol}
-                                        type="button"
-                                        onClick={() => handleSelectSuggestion(suggestion)}
-                                        className="w-full px-4 py-2 text-left hover:bg-gray-700/50 transition-colors flex items-center justify-between group"
-                                    >
-                                        <div>
-                                            <span className="text-white font-medium">{suggestion.symbol}</span>
-                                            <span className="text-gray-400 text-sm ml-2">{suggestion.name}</span>
-                                        </div>
-                                        <span className="text-xs text-gray-500 group-hover:text-gray-400">
-                                            {'market' in suggestion ? suggestion.market : ('contract_type' in suggestion ? (suggestion as TfexSymbol).contract_type : '')}
-                                        </span>
-                                    </button>
-                                ))
-                            ) : (
-                                <div className="px-4 py-3 text-gray-400 text-sm">
-                                    {t('ไม่พบผลลัพธ์', 'No results found')}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Display selected symbol name */}
-                    {formData.symbol_name && (
-                        <div className="mt-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                            <span className="text-emerald-400 text-sm">{formData.symbol_name}</span>
-                        </div>
-                    )}
-                </div>
 
                 {/* Quantity */}
+                {/* Quantity / Amount Input */}
                 <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">{t('จำนวน', 'Quantity')}</label>
-                    <input
-                        type="text"
-                        inputMode="decimal"
-                        value={quantityStr}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            // Allow empty, numbers, and decimal point
-                            if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                                setQuantityStr(val);
-                                // Only update formData when it's a valid number
-                                const num = parseFloat(val);
-                                if (!isNaN(num)) {
-                                    setFormData(prev => ({ ...prev, quantity: num }));
-                                } else if (val === '') {
-                                    setFormData(prev => ({ ...prev, quantity: 0 }));
+                    <div className="flex justify-between items-center mb-2">
+                        <label className="block text-sm font-medium text-gray-400">
+                            {inputMode === 'quantity' ? t('จำนวน', 'Quantity') : t('มูลค่ารวม (USDT)', 'Total Value (USDT)')}
+                        </label>
+                        {(formData.asset_type === 'crypto' || formData.asset_type === 'stock') && (
+                            <div className="flex bg-gray-700/50 rounded-lg p-0.5 border border-gray-600/50">
+                                <button
+                                    type="button"
+                                    onClick={() => setInputMode('quantity')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'quantity' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    Units
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setInputMode('total')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'total' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                >
+                                    Total
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    {inputMode === 'quantity' ? (
+                        <input
+                            type="text"
+                            inputMode="decimal"
+                            value={quantityStr}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                    setQuantityStr(val);
+                                    const num = parseFloat(val);
+                                    if (!isNaN(num)) {
+                                        setFormData(prev => ({ ...prev, quantity: num }));
+                                        // Update order amount preview if price exists
+                                        if (formData.price > 0) {
+                                            setOrderAmountStr((num * formData.price).toFixed(2));
+                                        }
+                                    } else if (val === '') {
+                                        setFormData(prev => ({ ...prev, quantity: 0 }));
+                                    }
                                 }
-                            }
-                        }}
-                        placeholder="0.00000001"
-                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
-                    />
+                            }}
+                            placeholder="0.00000001"
+                            className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                        />
+                    ) : (
+                        <div>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={orderAmountStr}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                            setOrderAmountStr(val);
+                                            const amount = parseFloat(val);
+                                            if (!isNaN(amount) && formData.price > 0) {
+                                                const qty = amount / formData.price;
+                                                setQuantityStr(qty.toFixed(8));
+                                                setFormData(prev => ({ ...prev, quantity: qty }));
+                                            }
+                                        }
+                                    }}
+                                    placeholder="1000.00"
+                                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                                />
+                                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                                    <span className="text-gray-400 text-sm">USDT</span>
+                                </div>
+                            </div>
+                            <div className="mt-1 text-xs text-gray-500 text-right">
+                                ≈ {quantityStr || '0'} Units
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Price */}
@@ -802,35 +851,13 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                 <option value="HKD">HKD</option>
                                 <option value="SGD">SGD</option>
                                 <option value="BTC">BTC</option>
+                                <option value="USDT">USDT</option>
                             </select>
                         </div>
                         <button
                             type="button"
                             disabled={!formData.symbol || isFetchingPrice}
-                            onClick={async () => {
-                                if (!formData.symbol) return;
-                                setIsFetchingPrice(true);
-                                try {
-                                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-                                    const marketParam = formData.market ? `&market=${formData.market}` : '';
-                                    const response = await fetch(
-                                        `${apiUrl}/api/prices/${encodeURIComponent(formData.symbol)}?asset_type=${formData.asset_type}${marketParam}`
-                                    );
-                                    if (response.ok) {
-                                        const data = await response.json();
-                                        if (data.price) {
-                                            setPriceStr(String(data.price));
-                                            setFormData(prev => ({ ...prev, price: data.price }));
-                                        }
-                                    } else {
-                                        console.error('Failed to fetch price');
-                                    }
-                                } catch (error) {
-                                    console.error('Error fetching price:', error);
-                                } finally {
-                                    setIsFetchingPrice(false);
-                                }
-                            }}
+                            onClick={fetchLatestPrice}
                             className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-500/20 hover:bg-blue-500/30 disabled:bg-gray-700/30 disabled:cursor-not-allowed border border-blue-500/30 disabled:border-gray-600/30 rounded-md text-blue-400 disabled:text-gray-500 transition-all"
                             title={t('ดึงราคาล่าสุด', 'Fetch Latest Price')}
                         >

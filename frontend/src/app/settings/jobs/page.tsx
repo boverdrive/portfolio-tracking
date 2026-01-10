@@ -15,6 +15,7 @@ interface JobConfig {
     status: string;
     last_run: string | null;
     next_run: string | null;
+    schedule_times: string[] | null;
     last_result: any | null;
 }
 
@@ -65,12 +66,18 @@ export default function JobsPage() {
     }, []);
 
     // Update job
-    const updateJob = async (id: string, interval_seconds?: number, enabled?: boolean) => {
+    const updateJob = async (id: string, updates: Partial<JobConfig>) => {
         try {
+            // Optimistic update
+            setJobs(prev => prev.map(j => j.id === id ? { ...j, ...updates } : j));
+            if (selectedJob?.id === id) {
+                setSelectedJob(prev => prev ? { ...prev, ...updates } : null);
+            }
+
             const response = await fetch(`${API_URL}/api/jobs/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ interval_seconds, enabled }),
+                body: JSON.stringify(updates),
             });
             if (response.ok) {
                 const updated = await response.json();
@@ -78,9 +85,13 @@ export default function JobsPage() {
                 if (selectedJob?.id === id) {
                     setSelectedJob(updated);
                 }
+            } else {
+                // Revert if failed (simplified, assuming refresh on manual fix)
+                fetchJobs();
             }
         } catch (error) {
             console.error('Failed to update job:', error);
+            fetchJobs();
         }
     };
 
@@ -196,7 +207,7 @@ export default function JobsPage() {
                                                 <input
                                                     type="checkbox"
                                                     checked={job.enabled}
-                                                    onChange={(e) => updateJob(job.id, undefined, e.target.checked)}
+                                                    onChange={(e) => updateJob(job.id, { enabled: e.target.checked })}
                                                     className="sr-only peer"
                                                 />
                                                 <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -208,7 +219,12 @@ export default function JobsPage() {
                                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm mb-3">
                                         <div>
                                             <span className="text-gray-500">{t('ช่วงเวลา', 'Interval')}:</span>
-                                            <span className="ml-2 text-white">{getIntervalLabel(job.interval_seconds)}</span>
+                                            <span className="ml-2 text-white">
+                                                {job.schedule_times && job.schedule_times.length > 0
+                                                    ? `${job.schedule_times.length} times/day`
+                                                    : getIntervalLabel(job.interval_seconds)
+                                                }
+                                            </span>
                                         </div>
                                         <div>
                                             <span className="text-gray-500">{t('รันล่าสุด', 'Last Run')}:</span>
@@ -282,25 +298,94 @@ export default function JobsPage() {
 
                         {/* Config Section */}
                         <div className="space-y-4 mb-6">
+                            {/* Mode Toggle */}
                             <div>
                                 <label className="block text-sm text-gray-400 mb-2">
-                                    {t('ช่วงเวลาในการรัน', 'Run Interval')}
+                                    {t('โหมดการทำงาน', 'Execution Mode')}
                                 </label>
-                                <select
-                                    value={selectedJob.interval_seconds}
-                                    onChange={(e) => {
-                                        const newInterval = parseInt(e.target.value);
-                                        updateJob(selectedJob.id, newInterval);
-                                    }}
-                                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white"
-                                >
-                                    {INTERVAL_OPTIONS.map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                            {t(opt.label, opt.labelEn)}
-                                        </option>
-                                    ))}
-                                </select>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => updateJob(selectedJob.id, { schedule_times: null })}
+                                        className={`px-4 py-2 rounded-lg text-sm transition-colors border ${!selectedJob.schedule_times
+                                            ? 'bg-blue-600 border-blue-500 text-white'
+                                            : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+                                            }`}
+                                    >
+                                        {t('วนซ้ำตามเวลา', 'Interval Loop')}
+                                    </button>
+                                    <button
+                                        onClick={() => updateJob(selectedJob.id, { schedule_times: [] })}
+                                        className={`px-4 py-2 rounded-lg text-sm transition-colors border ${selectedJob.schedule_times
+                                            ? 'bg-blue-600 border-blue-500 text-white'
+                                            : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
+                                            }`}
+                                    >
+                                        {t('ระบุเวลาเจาะจง', 'Fixed Times')}
+                                    </button>
+                                </div>
                             </div>
+
+                            {!selectedJob.schedule_times ? (
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-2">
+                                        {t('ช่วงเวลาในการรัน', 'Run Interval')}
+                                    </label>
+                                    <select
+                                        value={selectedJob.interval_seconds}
+                                        onChange={(e) => {
+                                            const newInterval = parseInt(e.target.value);
+                                            updateJob(selectedJob.id, { interval_seconds: newInterval });
+                                        }}
+                                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white"
+                                    >
+                                        {INTERVAL_OPTIONS.map(opt => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {t(opt.label, opt.labelEn)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm text-gray-400 mb-2">
+                                        {t('เวลาที่ต้องการรัน (HH:MM)', 'Schedule Times (HH:MM)')}
+                                    </label>
+                                    <div className="space-y-2">
+                                        {selectedJob.schedule_times.map((time, idx) => (
+                                            <div key={idx} className="flex gap-2">
+                                                <input
+                                                    type="time"
+                                                    value={time}
+                                                    onChange={(e) => {
+                                                        const newTimes = [...(selectedJob.schedule_times || [])];
+                                                        newTimes[idx] = e.target.value;
+                                                        updateJob(selectedJob.id, { schedule_times: newTimes });
+                                                    }}
+                                                    className="flex-1 px-4 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white"
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        const newTimes = selectedJob.schedule_times?.filter((_, i) => i !== idx) || [];
+                                                        updateJob(selectedJob.id, { schedule_times: newTimes });
+                                                    }}
+                                                    className="px-3 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 rounded-lg"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <button
+                                            onClick={() => {
+                                                const newTimes = [...(selectedJob.schedule_times || []), "00:00"];
+                                                updateJob(selectedJob.id, { schedule_times: newTimes });
+                                            }}
+                                            className="w-full py-2 bg-gray-700/50 hover:bg-gray-700 border border-dashed border-gray-600 rounded-lg text-gray-400 text-sm"
+                                        >
+                                            + {t('เพิ่มเวลา', 'Add Time')}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex items-center justify-between p-4 bg-gray-700/30 rounded-lg">
                                 <div>
@@ -313,7 +398,7 @@ export default function JobsPage() {
                                     <input
                                         type="checkbox"
                                         checked={selectedJob.enabled}
-                                        onChange={(e) => updateJob(selectedJob.id, undefined, e.target.checked)}
+                                        onChange={(e) => updateJob(selectedJob.id, { enabled: e.target.checked })}
                                         className="sr-only peer"
                                     />
                                     <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -350,8 +435,8 @@ export default function JobsPage() {
                                                 <div
                                                     key={idx}
                                                     className={`p-3 rounded-lg border ${result.status === 'online'
-                                                            ? 'bg-emerald-500/10 border-emerald-500/30'
-                                                            : 'bg-rose-500/10 border-rose-500/30'
+                                                        ? 'bg-emerald-500/10 border-emerald-500/30'
+                                                        : 'bg-rose-500/10 border-rose-500/30'
                                                         }`}
                                                 >
                                                     <div className="flex items-center justify-between">

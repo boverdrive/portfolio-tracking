@@ -44,11 +44,12 @@ pub async fn get_price(
             tracing::debug!("📊 API price for {}: {} {}", symbol, price_entry.price, price_entry.currency);
             
             // Save/update price in PocketBase (upsert based on symbol+asset_type+market)
-            let market_str = market.as_ref().map(|m| m.to_string()).unwrap_or_default();
+            // Normalize market to lowercase to prevent duplicates
+            let market_str = market.as_ref().map(|m| m.to_string().to_lowercase()).unwrap_or_default();
             let _ = save_price_to_pocketbase(
                 pb_url,
-                &symbol,
-                &query.asset_type,
+                &symbol.to_uppercase(),
+                &query.asset_type.to_lowercase(),
                 &market_str,
                 price_entry.price,
                 &price_entry.currency,
@@ -63,11 +64,11 @@ pub async fn get_price(
     
     // Fallback: try to get price from PocketBase asset_prices collection
     let market_filter = if let Some(m) = &market {
-        format!(" && market='{}'", m)
+        format!(" && market='{}'", m.to_string().to_lowercase())
     } else {
         String::new()
     };
-    let filter = format!("symbol='{}' && asset_type='{}'{}", symbol, query.asset_type, market_filter);
+    let filter = format!("symbol='{}' && asset_type='{}'{}", symbol.to_uppercase(), query.asset_type.to_lowercase(), market_filter);
     let check_url = format!(
         "{}/api/collections/asset_prices/records?filter={}",
         pb_url,

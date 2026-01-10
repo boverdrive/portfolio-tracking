@@ -9,6 +9,7 @@ import TransactionList from '@/components/TransactionList';
 import AccountManager from '@/components/AccountManager';
 import PerformanceChart from '@/components/PerformanceChart';
 import Footer from '@/components/Footer';
+import AssetDetailsModal from '@/components/AssetDetailsModal';
 import { useSettings } from '@/contexts/SettingsContext';
 import {
     getPortfolio,
@@ -38,6 +39,8 @@ export default function Dashboard() {
     // Editing transaction
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
+    const [selectedAsset, setSelectedAsset] = useState<PortfolioAsset | null>(null);
+
     // Show closed positions toggle
     const [showClosedPositions, setShowClosedPositions] = useState(false);
 
@@ -65,12 +68,16 @@ export default function Dashboard() {
     const convertToDisplayCurrency = useCallback((value: number, fromCurrency: string = 'THB'): number => {
         if (displayCurrency === fromCurrency) return value;
 
+        // Normalize source currency for rate lookup (USDT -> USD)
+        // This ensures stablecoins use USD rates since our forex provider might not track crypto
+        const normalizedFrom = ['USDT', 'USDC', 'BUSD', 'DAI'].includes(fromCurrency) ? 'USD' : fromCurrency;
+
         // Convert from source currency to THB first if needed
         let valueInThb = value;
-        if (fromCurrency !== 'THB' && exchangeRates[fromCurrency]) {
+        if (normalizedFrom !== 'THB' && exchangeRates[normalizedFrom]) {
             // Rate is how much display currency per 1 THB
             // To convert FROM this currency TO THB, we divide by rate
-            valueInThb = value / exchangeRates[fromCurrency];
+            valueInThb = value / exchangeRates[normalizedFrom];
         }
 
         // Then convert from THB to display currency
@@ -149,10 +156,23 @@ export default function Dashboard() {
             ? (total_unrealized_pnl / total_invested) * 100
             : 0;
 
-        // Realized PnL comes from portfolio (not asset-level), use 0 for filtered or get from portfolio
-        const total_realized_pnl = selectedAccountId
-            ? 0 // Can't calculate per-account realized PnL from current data
-            : convertToDisplayCurrency(portfolio?.summary.total_realized_pnl || 0);
+        // Realized PnL calculation:
+        // If breakdown is available, convert each currency component and sum up
+        // Otherwise fallback to simple conversion of total (legacy behavior)
+        let total_realized_pnl = 0;
+
+        if (selectedAccountId) {
+            // Can't calculate per-account realized PnL from current data reliably without backend support
+            total_realized_pnl = 0;
+        } else if (portfolio?.summary.realized_pnl_breakdown) {
+            // New logic: Sum converted components
+            Object.entries(portfolio.summary.realized_pnl_breakdown).forEach(([currency, pnl]) => {
+                total_realized_pnl += convertToDisplayCurrency(pnl, currency);
+            });
+        } else {
+            // Fallback logic
+            total_realized_pnl = convertToDisplayCurrency(portfolio?.summary.total_realized_pnl || 0);
+        }
 
         return {
             total_invested,
@@ -218,6 +238,11 @@ export default function Dashboard() {
         { value: 'USD', label: 'USD (ดอลลาร์)', icon: '🇺🇸' },
         { value: 'BTC', label: 'BTC (บิทคอยน์)', icon: '₿' },
     ];
+
+    // Scroll to top when changing tabs, but keep state
+    useEffect(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [activeTab]);
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
@@ -330,10 +355,8 @@ export default function Dashboard() {
                     </div>
                 </div>
             </header>
-
-            {/* Main content */}
             <main className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {/* Error message */}
+                {/* ... (Error message) ... */}
                 {error && (
                     <div className="mb-6 bg-rose-500/10 border border-rose-500/30 text-rose-400 px-4 py-3 rounded-lg flex items-center gap-3">
                         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -433,8 +456,11 @@ export default function Dashboard() {
                             {activeTab === 'portfolio' ? (
                                 <AssetList
                                     assets={getConvertedAssets()}
+                                    portfolio={portfolio}
                                     isLoading={isLoading || isLoadingRates}
                                     displayCurrency={displayCurrency}
+                                    convertToDisplayCurrency={convertToDisplayCurrency}
+                                    onAssetSelect={setSelectedAsset}
                                 />
                             ) : (
                                 <TransactionList
@@ -501,6 +527,21 @@ export default function Dashboard() {
                 </div>
             </footer>
             <Footer />
+
+            {/* Global Modal Layer */}
+            {selectedAsset && (
+                <AssetDetailsModal
+                    asset={selectedAsset}
+                    portfolio={portfolio ? {
+                        ...portfolio,
+                        assets: portfolio.assets.map(a =>
+                            a.symbol === selectedAsset.symbol ? selectedAsset : a
+                        )
+                    } : { assets: [selectedAsset] } as any}
+                    displayCurrency={displayCurrency}
+                    onClose={() => setSelectedAsset(null)}
+                />
+            )}
         </div>
     );
 }

@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::error::AppError;
-use crate::models::{AssetType, Market};
+use crate::models::{AssetType, Market, CreateApiCallLogRequest};
 use crate::services::rate_limiter::RateLimiter;
+use crate::services::pocketbase::PocketBaseClient;
 
 /// Cached price entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +26,7 @@ pub struct PriceService {
     config: Config,
     cache: Arc<RwLock<HashMap<String, PriceEntry>>>,
     rate_limiter: Option<RateLimiter>,
+    pb_client: Option<PocketBaseClient>,
 }
 
 impl PriceService {
@@ -33,6 +36,7 @@ impl PriceService {
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
             rate_limiter: None,
+            pb_client: None,
         }
     }
     
@@ -43,12 +47,47 @@ impl PriceService {
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
             rate_limiter: Some(rate_limiter),
+            pb_client: None,
         }
+    }
+    
+    /// Set PocketBase client for provider configuration and logging
+    pub fn set_pb_client(&mut self, pb_client: PocketBaseClient) {
+        self.pb_client = Some(pb_client);
     }
     
     /// Set rate limiter after creation
     pub fn set_rate_limiter(&mut self, rate_limiter: RateLimiter) {
         self.rate_limiter = Some(rate_limiter);
+    }
+    
+    /// Log an API call to PocketBase (fire-and-forget)
+    fn log_api_call_async(
+        &self, 
+        provider_type: &str, 
+        market_id: Option<&str>,
+        symbol: &str,
+        status: &str,
+        response_time_ms: u64,
+        price: Option<f64>,
+        currency: Option<&str>,
+        error_message: Option<&str>,
+        request_url: Option<&str>,
+    ) {
+        if let Some(ref pb_client) = self.pb_client {
+            let log = CreateApiCallLogRequest {
+                provider_type: provider_type.to_string(),
+                market_id: market_id.map(|s| s.to_string()),
+                symbol: symbol.to_string(),
+                status: status.to_string(),
+                response_time_ms,
+                price,
+                currency: currency.map(|s| s.to_string()),
+                error_message: error_message.map(|s| s.to_string()),
+                request_url: request_url.map(|s| s.to_string()),
+            };
+            pb_client.log_api_call(log);
+        }
     }
     
     /// Check rate limit before making API call
@@ -68,6 +107,7 @@ impl PriceService {
     async fn record_api_call(&self, api_name: &str) {
         if let Some(ref limiter) = self.rate_limiter {
             limiter.record_request(api_name).await;
+
         }
     }
     
@@ -242,6 +282,8 @@ impl PriceService {
         );
 
         tracing::info!("Fetching crypto price from Bitkub: {}", url);
+        
+        let start = Instant::now();
 
         let response = self.client
             .get(&url)
@@ -251,17 +293,19 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("bitkub").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("bitkub", None).await;
+            self.log_api_call_async("bitkub", None, symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("Bitkub rate limit exceeded".to_string()));
         }
         
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "Bitkub API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("Bitkub API error: {}", response.status());
+            self.log_api_call_async("bitkub", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -271,10 +315,14 @@ impl PriceService {
             .get(&pair)
             .and_then(|v| v.get("last"))
             .and_then(|v| v.as_f64())
-            .ok_or_else(|| AppError::ExternalApiError(format!(
-                "Could not parse Bitkub price for {}",
-                symbol
-            )))?;
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse Bitkub price for {}", symbol);
+                self.log_api_call_async("bitkub", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+
+        // Log successful API call
+        self.log_api_call_async("bitkub", None, symbol, "success", elapsed_ms, Some(thb_price), Some("THB"), None, Some(&url));
 
         Ok(PriceEntry {
             symbol: symbol.to_uppercase(),
@@ -286,17 +334,26 @@ impl PriceService {
 
     /// Fetch price from Binance API (returns USDT price)
     async fn fetch_binance_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // Special case: Gold (XAU) and Silver (XAG) are only available on Binance Futures
+        // Redirect to futures API transparently
+        if symbol.eq_ignore_ascii_case("XAG") || symbol.eq_ignore_ascii_case("XAU") {
+            tracing::info!("Redirecting {} to Binance Futures (not available on Spot)", symbol);
+            return self.fetch_binance_futures_price(symbol).await;
+        }
+
         // Check rate limit first
         self.check_rate_limit("binance").await?;
         
-        // Binance uses BTCUSDT format
-        let pair = format!("{}USDT", symbol.to_uppercase());
+        let symbol_upper = symbol.to_uppercase(); // Binance uses BTCUSDT format
+        let pair = format!("{}USDT", symbol_upper);
         let url = format!(
             "https://api.binance.com/api/v3/ticker/price?symbol={}",
             pair
         );
 
         tracing::info!("Fetching crypto price from Binance: {}", url);
+        
+        let start = Instant::now();
 
         let response = self.client
             .get(&url)
@@ -306,17 +363,19 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("binance").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("binance", None).await;
+            self.log_api_call_async("binance", None, symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("Binance rate limit exceeded".to_string()));
         }
         
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "Binance API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("Binance API error: {}", response.status());
+            self.log_api_call_async("binance", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -326,10 +385,14 @@ impl PriceService {
             .get("price")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<f64>().ok())
-            .ok_or_else(|| AppError::ExternalApiError(format!(
-                "Could not parse Binance price for {}",
-                symbol
-            )))?;
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse Binance price for {}", symbol);
+                self.log_api_call_async("binance", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+
+        // Log successful API call
+        self.log_api_call_async("binance", None, symbol, "success", elapsed_ms, Some(usdt_price), Some("USDT"), None, Some(&url));
 
         Ok(PriceEntry {
             symbol: symbol.to_uppercase(),
@@ -359,6 +422,8 @@ impl PriceService {
 
         tracing::info!("Fetching futures price from Binance Futures: {}", url);
 
+        let start = Instant::now();
+
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
@@ -367,17 +432,19 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("binance").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("binance", None).await;
+            self.log_api_call_async("binance_futures", Some("FUTURES"), symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("Binance Futures rate limit exceeded".to_string()));
         }
         
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "Binance Futures API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("Binance Futures API error: {}", response.status());
+            self.log_api_call_async("binance_futures", Some("FUTURES"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -387,10 +454,14 @@ impl PriceService {
             .get("price")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<f64>().ok())
-            .ok_or_else(|| AppError::ExternalApiError(format!(
-                "Could not parse Binance Futures price for {}",
-                symbol
-            )))?;
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse Binance Futures price for {}", symbol);
+                self.log_api_call_async("binance_futures", Some("FUTURES"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+        
+        // Log successful API call
+        self.log_api_call_async("binance_futures", Some("FUTURES"), symbol, "success", elapsed_ms, Some(usdt_price), Some("USDT"), None, Some(&url));
 
         tracing::info!("Binance Futures price for {}: {} USDT", symbol, usdt_price);
 
@@ -416,6 +487,8 @@ impl PriceService {
 
         tracing::info!("Fetching crypto price from OKX: {}", url);
 
+        let start = Instant::now();
+
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
@@ -424,22 +497,32 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("okx").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("okx", None).await;
+            self.log_api_call_async("okx", None, symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("OKX rate limit exceeded".to_string()));
         }
 
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "OKX API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("OKX API error: {}", response.status());
+            self.log_api_call_async("okx", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
         
         // OKX response format: { "code": "0", "data": [{ "last": "94123.5", ... }] }
+        if let Some(code) = data.get("code").and_then(|c| c.as_str()) {
+            if code != "0" {
+                let msg = data.get("msg").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+                let error_msg = format!("OKX API error code {}: {}", code, msg);
+                self.log_api_call_async("okx", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                return Err(AppError::ExternalApiError(error_msg));
+            }
+        }
         let usd_price = data
             .get("data")
             .and_then(|d| d.as_array())
@@ -447,10 +530,14 @@ impl PriceService {
             .and_then(|item| item.get("last"))
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<f64>().ok())
-            .ok_or_else(|| AppError::ExternalApiError(format!(
-                "Could not parse OKX price for {}",
-                symbol
-            )))?;
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse OKX price for {}", symbol);
+                self.log_api_call_async("okx", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+
+        // Log successful API call
+        self.log_api_call_async("okx", None, symbol, "success", elapsed_ms, Some(usd_price), Some("USD"), None, Some(&url));
 
         // Return USD price since OKX transactions are in USD
         Ok(PriceEntry {
@@ -475,6 +562,8 @@ impl PriceService {
 
         tracing::info!("Fetching crypto price from KuCoin: {}", url);
 
+        let start = Instant::now();
+
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
@@ -483,17 +572,19 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("kucoin").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("kucoin", None).await;
+            self.log_api_call_async("kucoin", None, symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("KuCoin rate limit exceeded".to_string()));
         }
-
+        
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "KuCoin API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("KuCoin API error: {}", response.status());
+            self.log_api_call_async("kucoin", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -504,10 +595,14 @@ impl PriceService {
             .and_then(|d| d.get("price"))
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse::<f64>().ok())
-            .ok_or_else(|| AppError::ExternalApiError(format!(
-                "Could not parse KuCoin price for {}",
-                symbol
-            )))?;
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse KuCoin price for {}", symbol);
+                self.log_api_call_async("kucoin", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+
+        // Log successful API call
+        self.log_api_call_async("kucoin", None, symbol, "success", elapsed_ms, Some(usdt_price), Some("USDT"), None, Some(&url));
 
         Ok(PriceEntry {
             symbol: symbol.to_uppercase(),
@@ -531,6 +626,8 @@ impl PriceService {
 
         tracing::info!("Fetching crypto price from HTX: {}", url);
 
+        let start = Instant::now();
+
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
@@ -539,17 +636,19 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("htx").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("htx", None).await;
+            self.log_api_call_async("htx", None, symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("HTX rate limit exceeded".to_string()));
         }
-
+        
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "HTX API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("HTX API error: {}", response.status());
+            self.log_api_call_async("htx", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -559,10 +658,14 @@ impl PriceService {
             .get("tick")
             .and_then(|t| t.get("close"))
             .and_then(|v| v.as_f64())
-            .ok_or_else(|| AppError::ExternalApiError(format!(
-                "Could not parse HTX price for {}",
-                symbol
-            )))?;
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse HTX price for {}", symbol);
+                self.log_api_call_async("htx", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+
+        // Log successful API call
+        self.log_api_call_async("htx", None, symbol, "success", elapsed_ms, Some(usdt_price), Some("USDT"), None, Some(&url));
 
         Ok(PriceEntry {
             symbol: symbol.to_uppercase(),
@@ -586,6 +689,8 @@ impl PriceService {
 
         tracing::info!("Fetching crypto price from CoinGecko: {}", url);
 
+        let start = Instant::now();
+
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
@@ -594,18 +699,20 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("coingecko").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             // CoinGecko rate limit - block for 60 seconds
             self.record_rate_limit_hit("coingecko", Some(60)).await;
+            self.log_api_call_async("coingecko", None, symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("CoinGecko rate limit exceeded. Please wait 60 seconds.".to_string()));
         }
-
+        
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "CoinGecko API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("CoinGecko API error: {}", response.status());
+            self.log_api_call_async("coingecko", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -614,10 +721,14 @@ impl PriceService {
             .get(&coin_id)
             .and_then(|v| v.get("thb"))
             .and_then(|v| v.as_f64())
-            .ok_or_else(|| AppError::ExternalApiError(format!(
-                "Could not parse price for {}",
-                symbol
-            )))?;
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse price for {}", symbol);
+                self.log_api_call_async("coingecko", None, symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+        
+        // Log successful API call
+        self.log_api_call_async("coingecko", None, symbol, "success", elapsed_ms, Some(price), Some("THB"), None, Some(&url));
 
         Ok(PriceEntry {
             symbol: symbol.to_uppercase(),
@@ -659,6 +770,8 @@ impl PriceService {
 
         tracing::info!("Fetching Thai stock price from Yahoo Finance: {}", url);
 
+        let start = Instant::now();
+
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
@@ -668,14 +781,19 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("yahoo_finance").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
+            self.log_api_call_async("yahoo_finance", Some("SET"), symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
         }
 
         if !response.status().is_success() {
-            tracing::warn!("Yahoo Finance API failed for {}, using mock", symbol);
+            let error_msg = format!("Yahoo Finance API failed for {}, using mock", symbol);
+            tracing::warn!("{}", error_msg);
+            self.log_api_call_async("yahoo_finance", Some("SET"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
             return self.fetch_tfex_mock_price(&symbol_upper).await;
         }
 
@@ -691,11 +809,16 @@ impl PriceService {
             .and_then(|meta| meta.get("regularMarketPrice"))
             .and_then(|v| v.as_f64())
             .ok_or_else(|| {
-                tracing::warn!("Could not parse Yahoo Finance price for {}", symbol);
+                let error_msg = format!("Could not parse Yahoo Finance price for {}", symbol);
+                tracing::warn!("{}", error_msg);
+                self.log_api_call_async("yahoo_finance", Some("SET"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
                 AppError::ExternalApiError(format!("Could not parse price for {}", symbol))
             })?;
 
         tracing::info!("Yahoo Finance price for {}: {} THB", symbol, price);
+        
+        // Log successful API call
+        self.log_api_call_async("yahoo_finance", Some("SET"), symbol, "success", elapsed_ms, Some(price), Some("THB"), None, Some(&url));
 
         Ok(PriceEntry {
             symbol: symbol_upper,
@@ -794,6 +917,8 @@ impl PriceService {
         );
 
         tracing::info!("Fetching TFEX price from Yahoo Finance: {} -> {}", original_symbol, url);
+        
+        let start = Instant::now();
 
         let response = self.client
             .get(&url)
@@ -803,17 +928,19 @@ impl PriceService {
             .await?;
         
         self.record_api_call("yahoo_finance").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
+            self.log_api_call_async("yahoo_finance", Some("TFEX"), original_symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
         }
 
         if !response.status().is_success() {
-            return Err(AppError::ExternalApiError(format!(
-                "Yahoo Finance API error: {}",
-                response.status()
-            )));
+            let error_msg = format!("Yahoo Finance API error: {}", response.status());
+            self.log_api_call_async("yahoo_finance", Some("TFEX"), original_symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+            return Err(AppError::ExternalApiError(error_msg));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -827,10 +954,15 @@ impl PriceService {
             .and_then(|meta| meta.get("regularMarketPrice"))
             .and_then(|v| v.as_f64())
             .ok_or_else(|| {
-                AppError::ExternalApiError(format!("Could not parse price for {}", original_symbol))
+                                let error_msg = format!("Could not parse price for {}", original_symbol);
+                self.log_api_call_async("yahoo_finance", Some("TFEX"), original_symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
             })?;
 
         tracing::info!("Yahoo Finance {} price for {}: {} {}", yahoo_symbol, original_symbol, price, currency);
+        
+        // Log successful API call
+        self.log_api_call_async("yahoo_finance", Some("TFEX"), original_symbol, "success", elapsed_ms, Some(price), Some(currency), None, Some(&url));
 
         Ok(PriceEntry {
             symbol: original_symbol.to_string(),
@@ -858,6 +990,8 @@ impl PriceService {
         );
 
         tracing::info!("Fetching foreign stock price from Yahoo Finance: {}", url);
+        
+        let start = Instant::now();
 
         let response = self.client
             .get(&url)
@@ -868,14 +1002,19 @@ impl PriceService {
         
         // Record the API call
         self.record_api_call("yahoo_finance").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
 
         if response.status().as_u16() == 429 {
             self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
+            self.log_api_call_async("yahoo_finance", Some("Foreign"), symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
             return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
         }
 
         if !response.status().is_success() {
-            tracing::warn!("Yahoo Finance API failed for {}, using mock", symbol);
+            let error_msg = format!("Yahoo Finance API failed for {}, using mock", symbol);
+            tracing::warn!("{}", error_msg);
+            self.log_api_call_async("yahoo_finance", Some("Foreign"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
             return self.fetch_foreign_stock_mock(&symbol_upper, market);
         }
 
@@ -898,6 +1037,9 @@ impl PriceService {
                 
             if let Some(price) = price {
                 tracing::info!("Yahoo Finance price for {}: {} {}", symbol, price, currency);
+                
+                // Log successful API call
+                self.log_api_call_async("yahoo_finance", Some("Foreign"), symbol, "success", elapsed_ms, Some(price), Some(currency), None, Some(&url));
                 
                 return Ok(PriceEntry {
                     symbol: symbol_upper,

@@ -51,11 +51,20 @@ pub async fn get_portfolio(
     
     // Group transactions by symbol+type+market and calculate holdings
     let mut holdings: HashMap<String, PortfolioAsset> = HashMap::new();
-    let mut realized_pnl = 0.0;
+    let mut realized_pnl = 0.0; // Keep for backward compatibility (sum of all raw values)
+    let mut realized_pnl_breakdown: HashMap<String, f64> = HashMap::new();
     
     for tx in &sorted_transactions {
+        // Determine position "bucket" to support Hedge Mode (separating Spot, Long, Short)
+        let position_bucket = match tx.action {
+            TradeAction::Buy | TradeAction::Sell => "spot",
+            TradeAction::Long | TradeAction::CloseLong => "long",
+            TradeAction::Short | TradeAction::CloseShort => "short",
+        };
+        
         let market_key = tx.market.as_ref().map(|m| m.to_string()).unwrap_or_default();
-        let key = format!("{}:{}:{}", tx.asset_type, market_key, tx.symbol);
+        // Key now includes position_bucket to separate distinct positions (Hedge Mode)
+        let key = format!("{}:{}:{}:{}", tx.asset_type, market_key, tx.symbol, position_bucket);
         
         let asset = holdings.entry(key.clone()).or_insert_with(|| {
             let currency = tx.currency.clone()
@@ -67,6 +76,8 @@ pub async fn get_portfolio(
                 tx.market.clone(),
                 currency,
             );
+            new_asset.position_type = position_bucket.to_string(); // Set the position type
+            
             // Set leverage from first transaction
             if let Some(lev) = tx.leverage {
                 new_asset.leverage = lev;
@@ -102,10 +113,13 @@ pub async fn get_portfolio(
             }
             TradeAction::Short => {
                 // Open Short - create/increase negative position
-                let new_quantity = asset.quantity - tx.quantity;  // Goes negative
+                // Note: In Hedge mode, this bucket contains ONLY Short positions.
+                // quantity will be negative.
+                let new_quantity = asset.quantity - tx.quantity;  // Goes more negative
                 let short_value = tx.quantity * tx.price;
                 
-                // For short, avg_cost is the price at which we shorted
+                // For short, avg_cost is the price at which we shorted.
+                // We add the new short value to the existing basis.
                 let total_short_cost = (asset.quantity.abs() * asset.avg_cost) + short_value;
                 asset.avg_cost = if new_quantity.abs() > 0.0 {
                     total_short_cost / new_quantity.abs()
@@ -119,14 +133,23 @@ pub async fn get_portfolio(
             }
             TradeAction::Sell | TradeAction::CloseLong => {
                 // Sell, CloseLong - close long position
+                // This logic runs on "spot" or "long" buckets.
                 if asset.quantity > 0.0 {
                     let sell_value = tx.quantity * tx.price - tx.fees;
                     let cost_basis = tx.quantity * asset.avg_cost;
                     let pnl = sell_value - cost_basis;
                     realized_pnl += pnl;
-                    asset.realized_pnl += pnl;  // Accumulate per-asset realized P&L
+                    
+                    // Accumulate breakdown by currency
+                    let currency = tx.currency.clone()
+                        .or_else(|| tx.market.as_ref().map(|m| m.default_currency().to_string()))
+                        .unwrap_or_else(|| "THB".to_string());
+                    *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
+                    
+                    asset.realized_pnl += pnl;
                     
                     // Reduce quantity and proportionally reduce fees
+                    // Logic: Removing a portion of the holding removes a portion of the "Open Cost" fees.
                     let ratio = tx.quantity / asset.quantity;
                     asset.total_fees -= asset.total_fees * ratio;
                     
@@ -135,13 +158,21 @@ pub async fn get_portfolio(
                 }
             }
             TradeAction::CloseShort => {
-                // CloseShort - buy to close short position (when quantity is negative)
+                // CloseShort - buy to close short position
+                // This logic runs on "short" bucket where quantity is negative.
                 if asset.quantity < 0.0 {
                     let buy_cost = tx.quantity * tx.price + tx.fees;
-                    let short_value = tx.quantity * asset.avg_cost;  // What we sold for
-                    let pnl = short_value - buy_cost;  // Profit if buy_cost < short_value
+                    let short_value = tx.quantity * asset.avg_cost;  // Price we sold at * qty
+                    let pnl = short_value - buy_cost;
                     realized_pnl += pnl;
-                    asset.realized_pnl += pnl;  // Accumulate per-asset realized P&L
+                    
+                    // Accumulate breakdown by currency
+                    let currency = tx.currency.clone()
+                        .or_else(|| tx.market.as_ref().map(|m| m.default_currency().to_string()))
+                        .unwrap_or_else(|| "THB".to_string());
+                    *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
+
+                    asset.realized_pnl += pnl;
                     
                     // Reduce negative quantity (towards 0)
                     let ratio = tx.quantity / asset.quantity.abs();
@@ -276,6 +307,7 @@ pub async fn get_portfolio(
     // Calculate portfolio summary
     let mut summary = PortfolioSummary::new();
     summary.total_realized_pnl = realized_pnl;
+    summary.realized_pnl_breakdown = realized_pnl_breakdown;
     summary.assets_count = active_holdings.len();
     
     for asset in &active_holdings {

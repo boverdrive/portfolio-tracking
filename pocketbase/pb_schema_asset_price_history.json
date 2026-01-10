@@ -1,0 +1,126 @@
+[
+    {
+        "id": "asset_price_history_col",
+        "name": "asset_price_history",
+        "type": "base",
+        "system": false,
+        "fields": [
+            {
+                "id": "text_symbol_aph_01",
+                "name": "symbol",
+                "type": "text",
+                "system": false,
+                "required": true,
+                "presentable": true,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "text_asset_type_aph_02",
+                "name": "asset_type",
+                "type": "text",
+                "system": false,
+                "required": true,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "text_market_aph_03",
+                "name": "market",
+                "type": "text",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "number_price_aph_04",
+                "name": "price",
+                "type": "number",
+                "system": false,
+                "required": true,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "noDecimal": false
+                }
+            },
+            {
+                "id": "text_currency_aph_05",
+                "name": "currency",
+                "type": "text",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "date_recorded_at_aph_06",
+                "name": "recorded_at",
+                "type": "date",
+                "system": false,
+                "required": true,
+                "presentable": true,
+                "unique": false,
+                "options": {
+                    "min": "",
+                    "max": ""
+                }
+            },
+            {
+                "id": "autodate_created_aph_07",
+                "name": "created",
+                "type": "autodate",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "onCreate": true,
+                "onUpdate": false,
+                "options": {}
+            },
+            {
+                "id": "autodate_updated_aph_08",
+                "name": "updated",
+                "type": "autodate",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "onCreate": true,
+                "onUpdate": true,
+                "options": {}
+            }
+        ],
+        "indexes": [
+            "CREATE INDEX `idx_aph_symbol_date` ON `asset_price_history` (`symbol`, `recorded_at`)"
+        ],
+        "listRule": "",
+        "viewRule": "",
+        "createRule": "",
+        "updateRule": null,
+        "deleteRule": null,
+        "options": {}
+    }
+]

@@ -300,6 +300,9 @@ impl PocketBaseClient {
         if let Some(fees) = req.fees {
             transaction.fees = fees;
         }
+        if let Some(currency) = req.currency {
+            transaction.currency = Some(currency);
+        }
         if let Some(timestamp) = req.timestamp {
             transaction.timestamp = timestamp;
         }
@@ -637,5 +640,279 @@ impl PocketBaseClient {
             .collect();
         
         Ok(filtered)
+    }
+
+    // ==================== API Provider Operations ====================
+
+    /// Get all API providers for a market, sorted by priority
+    pub async fn get_providers_by_market(&self, market_id: &str) -> Result<Vec<crate::models::ApiProvider>, AppError> {
+        let token = self.get_token().await;
+        let url = format!(
+            "{}/api/collections/api_providers/records?filter=(market_id='{}')&sort=priority",
+            self.pocketbase_url,
+            market_id
+        );
+        
+        let request = self.client.get(&url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        let response = request.send().await
+            .map_err(|e| AppError::Internal(format!("Failed to fetch providers: {}", e)))?;
+        
+        if response.status().is_success() {
+            let data: PBListResponse<crate::models::ApiProvider> = response.json().await
+                .map_err(|e| AppError::Internal(format!("Failed to parse providers: {}", e)))?;
+            Ok(data.items)
+        } else {
+            tracing::warn!("No providers found for market {}", market_id);
+            Ok(vec![])
+        }
+    }
+
+    /// Get all API providers
+    pub async fn list_all_providers(&self) -> Result<Vec<crate::models::ApiProvider>, AppError> {
+        let token = self.get_token().await;
+        let url = format!(
+            "{}/api/collections/api_providers/records?sort=market_id,priority&perPage=500",
+            self.pocketbase_url
+        );
+        
+        let request = self.client.get(&url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        let response = request.send().await
+            .map_err(|e| AppError::Internal(format!("Failed to fetch providers: {}", e)))?;
+        
+        if response.status().is_success() {
+            let data: PBListResponse<crate::models::ApiProvider> = response.json().await
+                .map_err(|e| AppError::Internal(format!("Failed to parse providers: {}", e)))?;
+            Ok(data.items)
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    /// Create a new API provider
+    pub async fn create_provider(&self, req: crate::models::CreateApiProviderRequest) -> Result<crate::models::ApiProvider, AppError> {
+        let token = self.get_token().await;
+        let url = format!("{}/api/collections/api_providers/records", self.pocketbase_url);
+        
+        let body = serde_json::json!({
+            "market_id": req.market_id,
+            "provider_name": req.provider_name,
+            "provider_type": req.provider_type,
+            "api_url": req.api_url.unwrap_or_default(),
+            "priority": req.priority,
+            "enabled": req.enabled.unwrap_or(true),
+            "timeout_ms": req.timeout_ms.unwrap_or(10000),
+        });
+        
+        let request = self.client.post(&url).json(&body);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        let response = request.send().await
+            .map_err(|e| AppError::Internal(format!("Failed to create provider: {}", e)))?;
+        
+        if response.status().is_success() {
+            let provider: crate::models::ApiProvider = response.json().await
+                .map_err(|e| AppError::Internal(format!("Failed to parse provider: {}", e)))?;
+            tracing::info!("✅ Created API provider: {} for market {}", provider.provider_name, provider.market_id);
+            Ok(provider)
+        } else {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            Err(AppError::Internal(format!("Failed to create provider: {} - {}", status, body)))
+        }
+    }
+
+    /// Update an API provider
+    pub async fn update_provider(&self, id: &str, req: crate::models::UpdateApiProviderRequest) -> Result<crate::models::ApiProvider, AppError> {
+        let token = self.get_token().await;
+        let url = format!("{}/api/collections/api_providers/records/{}", self.pocketbase_url, id);
+        
+        let mut body = serde_json::Map::new();
+        if let Some(name) = req.provider_name {
+            body.insert("provider_name".to_string(), serde_json::Value::String(name));
+        }
+        if let Some(ptype) = req.provider_type {
+            body.insert("provider_type".to_string(), serde_json::Value::String(ptype));
+        }
+        if let Some(api_url) = req.api_url {
+            body.insert("api_url".to_string(), serde_json::Value::String(api_url));
+        }
+        if let Some(priority) = req.priority {
+            body.insert("priority".to_string(), serde_json::Value::Number(priority.into()));
+        }
+        if let Some(enabled) = req.enabled {
+            body.insert("enabled".to_string(), serde_json::Value::Bool(enabled));
+        }
+        if let Some(timeout_ms) = req.timeout_ms {
+            body.insert("timeout_ms".to_string(), serde_json::Value::Number(timeout_ms.into()));
+        }
+        
+        let request = self.client.patch(&url).json(&serde_json::Value::Object(body));
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        let response = request.send().await
+            .map_err(|e| AppError::Internal(format!("Failed to update provider: {}", e)))?;
+        
+        if response.status().is_success() {
+            let provider: crate::models::ApiProvider = response.json().await
+                .map_err(|e| AppError::Internal(format!("Failed to parse provider: {}", e)))?;
+            tracing::info!("✅ Updated API provider: {}", id);
+            Ok(provider)
+        } else {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            Err(AppError::Internal(format!("Failed to update provider: {} - {}", status, body)))
+        }
+    }
+
+    /// Delete an API provider
+    pub async fn delete_provider(&self, id: &str) -> Result<(), AppError> {
+        let token = self.get_token().await;
+        let url = format!("{}/api/collections/api_providers/records/{}", self.pocketbase_url, id);
+        
+        let request = self.client.delete(&url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        let response = request.send().await
+            .map_err(|e| AppError::Internal(format!("Failed to delete provider: {}", e)))?;
+        
+        if response.status().is_success() {
+            tracing::info!("✅ Deleted API provider: {}", id);
+            Ok(())
+        } else {
+            let status = response.status();
+            Err(AppError::Internal(format!("Failed to delete provider: {}", status)))
+        }
+    }
+
+    /// Reorder providers for a market (update priorities)
+    pub async fn reorder_providers(&self, market_id: &str, provider_ids: Vec<String>) -> Result<(), AppError> {
+        for (index, provider_id) in provider_ids.iter().enumerate() {
+            let priority = (index + 1) as i32;
+            let req = crate::models::UpdateApiProviderRequest {
+                provider_name: None,
+                provider_type: None,
+                api_url: None,
+                priority: Some(priority),
+                enabled: None,
+                timeout_ms: None,
+            };
+            self.update_provider(provider_id, req).await?;
+        }
+        tracing::info!("✅ Reordered {} providers for market {}", provider_ids.len(), market_id);
+        Ok(())
+    }
+
+    // ==================== API Call Log Operations ====================
+
+    /// Log an API call (fire-and-forget, does not block)
+    pub fn log_api_call(&self, log: crate::models::CreateApiCallLogRequest) {
+        let url = format!("{}/api/collections/api_call_logs/records", self.pocketbase_url);
+        let client = self.client.clone();
+        let me = self.clone();
+        
+        tokio::spawn(async move {
+            let token = me.get_token().await;
+            
+            let request = client.post(&url).json(&log);
+            let request = if !token.is_empty() {
+                request.header("Authorization", token)
+            } else {
+                request
+            };
+            
+            match request.send().await {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        tracing::warn!("⚠️ Failed to log API call: {}", resp.status());
+                    }
+                }
+                Err(e) => tracing::warn!("⚠️ Could not log API call: {}", e),
+            }
+        });
+    }
+
+    /// Get recent API call logs (with pagination)
+    pub async fn get_api_logs(&self, page: u32, per_page: u32) -> Result<(Vec<crate::models::ApiCallLog>, u32), AppError> {
+        let token = self.get_token().await;
+        let url = format!(
+            "{}/api/collections/api_call_logs/records?page={}&perPage={}&sort=-created",
+            self.pocketbase_url, page, per_page
+        );
+        
+        let request = self.client.get(&url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", token)
+        } else {
+            request
+        };
+        
+        let response = request.send().await
+            .map_err(|e| AppError::Internal(format!("Failed to fetch logs: {}", e)))?;
+        
+        if response.status().is_success() {
+            let data: PBListResponse<crate::models::ApiCallLog> = response.json().await
+                .map_err(|e| AppError::Internal(format!("Failed to parse logs: {}", e)))?;
+            Ok((data.items, data.total_items))
+        } else {
+            Ok((vec![], 0))
+        }
+    }
+
+    /// Get API call statistics by provider
+    pub async fn get_api_stats(&self) -> Result<Vec<crate::models::ApiCallStats>, AppError> {
+        // Simple implementation: fetch recent logs and aggregate
+        let (logs, _) = self.get_api_logs(1, 1000).await?;
+        
+        let mut stats_map: std::collections::HashMap<String, (u64, u64, u64, u64)> = std::collections::HashMap::new();
+        
+        for log in logs {
+            let entry = stats_map.entry(log.provider_type.clone()).or_insert((0, 0, 0, 0));
+            entry.0 += 1; // total
+            if log.status == "success" {
+                entry.1 += 1; // success
+            } else {
+                entry.2 += 1; // error
+            }
+            entry.3 += log.response_time_ms; // total time
+        }
+        
+        let stats: Vec<crate::models::ApiCallStats> = stats_map.into_iter()
+            .map(|(provider, (total, success, error, total_time))| {
+                crate::models::ApiCallStats {
+                    provider_type: provider,
+                    total_calls: total,
+                    success_count: success,
+                    error_count: error,
+                    success_rate: if total > 0 { (success as f64 / total as f64) * 100.0 } else { 0.0 },
+                    avg_response_time_ms: if total > 0 { total_time as f64 / total as f64 } else { 0.0 },
+                }
+            })
+            .collect();
+        
+        Ok(stats)
     }
 }

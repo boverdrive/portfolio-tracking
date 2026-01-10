@@ -9,6 +9,7 @@ pub mod job;
 pub mod users;
 pub mod snapshot;
 pub mod rate_limit;
+pub mod api_providers;
 
 pub use transactions::*;
 pub use portfolio::*;
@@ -21,3 +22,4 @@ pub use job::*;
 pub use users::*;
 pub use snapshot::*;
 pub use rate_limit::*;
+pub use api_providers::*;

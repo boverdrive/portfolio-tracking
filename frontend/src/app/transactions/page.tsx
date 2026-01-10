@@ -83,9 +83,12 @@ export default function TransactionsPage() {
     const convertToDisplayCurrency = useCallback((value: number, fromCurrency: string = 'THB'): number => {
         if (displayCurrency === fromCurrency) return value;
 
+        // Normalize source currency for rate lookup (USDT -> USD)
+        const normalizedFrom = ['USDT', 'USDC', 'BUSD', 'DAI'].includes(fromCurrency) ? 'USD' : fromCurrency;
+
         let valueInThb = value;
-        if (fromCurrency !== 'THB' && exchangeRates[fromCurrency]) {
-            valueInThb = value / exchangeRates[fromCurrency];
+        if (normalizedFrom !== 'THB' && exchangeRates[normalizedFrom]) {
+            valueInThb = value / exchangeRates[normalizedFrom];
         }
 
         if (displayCurrency === 'THB') return valueInThb;

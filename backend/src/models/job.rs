@@ -33,12 +33,14 @@ pub struct JobConfig {
     pub interval_seconds: u64,      // Interval in seconds (default: 86400 = 1 day)
     #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_job_status")]
     pub status: JobStatus,
     #[serde(default)]
     pub last_run: Option<String>,   // Changed to String for flexibility
     #[serde(default)]
     pub next_run: Option<String>,   // Changed to String for flexibility
+    #[serde(default)]
+    pub schedule_times: Option<Vec<String>>, // Specific run times e.g. ["07:00", "17:00"]
     #[serde(default)]
     pub last_result: Option<serde_json::Value>,
     // PocketBase auto-generated fields - ignore unknown fields
@@ -80,6 +82,23 @@ where
     }
 }
 
+fn deserialize_job_status<'de, D>(deserializer: D) -> Result<JobStatus, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::String(s) => match s.as_str() {
+            "running" => Ok(JobStatus::Running),
+            "success" => Ok(JobStatus::Success),
+            "failed" => Ok(JobStatus::Failed),
+            "disabled" => Ok(JobStatus::Disabled),
+            _ => Ok(JobStatus::Idle),
+        },
+        _ => Ok(JobStatus::Idle),
+    }
+}
+
 fn default_interval() -> u64 { 86400 }
 fn default_true() -> bool { true }
 
@@ -95,6 +114,7 @@ impl Default for JobConfig {
             status: JobStatus::Idle,
             last_run: None,
             next_run: None,
+            schedule_times: None,
             last_result: None,
             created: None,
             updated: None,

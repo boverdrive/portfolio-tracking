@@ -76,17 +76,23 @@ async fn main() {
         tracing::warn!("Failed to initialize rate limiter: {}", e);
     }
     
-    // Create price service with rate limiter
-    let price_service = PriceService::with_rate_limiter(config.clone(), rate_limiter.clone());
+    // Create price service with rate limiter and PocketBase client for logging
+    let mut price_service = PriceService::with_rate_limiter(config.clone(), rate_limiter.clone());
+    price_service.set_pb_client(db.clone());
+    
     let exchange_rate_service = ExchangeRateService::new(config.clone());
     let auth_service = AuthService::new(config.clone(), db.clone()).await;
     let job_scheduler = JobScheduler::new(config.clone(), db.clone(), price_service.clone());
     let symbols_service = SymbolsService::new(config.pocketbase_url.clone(), db.clone());
+
     
     // Initialize job scheduler (load jobs from database)
     if let Err(e) = job_scheduler.initialize().await {
         tracing::warn!("Failed to initialize job scheduler: {}", e);
     }
+    
+    // Start the job scheduler loop
+    job_scheduler.start();
 
     let state = AppState {
         db,
@@ -182,7 +188,20 @@ async fn main() {
         // Rate limit routes
         .route("/api/rate-limits", get(handlers::get_rate_limits))
         
+        // API Provider routes
+        .route("/api/providers", get(handlers::list_providers))
+        .route("/api/providers", post(handlers::create_provider))
+        .route("/api/providers/:id", put(handlers::update_provider))
+        .route("/api/providers/:id", delete(handlers::delete_provider))
+        .route("/api/providers/market/:market_id", get(handlers::get_providers_by_market))
+        .route("/api/providers/market/:market_id/reorder", put(handlers::reorder_providers))
+        
+        // API Logs routes
+        .route("/api/logs", get(handlers::get_api_logs))
+        .route("/api/logs/stats", get(handlers::get_api_stats))
+        
         // Add middleware
+
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
