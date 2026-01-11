@@ -224,19 +224,18 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                                     }
                                     return null;
                                 })()}
-                                {showPnl ? (
+                                {showPnl && (
                                     <div className={`text-xs font-medium ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                         {pnl >= 0 ? '+' : ''}{convertToDisplayCurrency ? formatCurrency(convertToDisplayCurrency(pnl, 'THB'), displayCurrency) : formatCurrency(pnl, 'THB')} ({formatPercent(pnlPercent)})
                                     </div>
-                                ) : (
-                                    tx.fees > 0 && (
-                                        <div className="text-xs text-gray-500">
-                                            {t('ค่าธรรมเนียม', 'Fees')}: {formatCurrency(
-                                                convertToDisplayCurrency ? convertToDisplayCurrency(tx.fees, tx.currency) : tx.fees,
-                                                displayCurrency
-                                            )}
-                                        </div>
-                                    )
+                                )}
+                                {tx.fees > 0 && (
+                                    <div className="text-xs text-gray-500">
+                                        {t('ค่าธรรมเนียม', 'Fees')}: {formatCurrency(
+                                            convertToDisplayCurrency ? convertToDisplayCurrency(tx.fees, tx.currency) : tx.fees,
+                                            displayCurrency
+                                        )}
+                                    </div>
                                 )}
                             </div>
 

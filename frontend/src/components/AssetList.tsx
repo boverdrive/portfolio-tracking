@@ -16,7 +16,7 @@ interface Props {
     onAssetSelect?: (asset: PortfolioAsset) => void;
 }
 
-type SortColumn = 'symbol' | 'quantity' | 'avg_cost' | 'current_price' | 'pnl';
+type SortColumn = 'symbol' | 'quantity' | 'avg_cost' | 'current_price' | 'current_value' | 'pnl';
 type SortDirection = 'asc' | 'desc';
 
 export default function AssetList({ assets, portfolio, isLoading, displayCurrency = 'THB', convertToDisplayCurrency, onAssetSelect }: Props) {
@@ -63,6 +63,10 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                 case 'current_price':
                     aVal = a.current_price;
                     bVal = b.current_price;
+                    break;
+                case 'current_value':
+                    aVal = a.current_value;
+                    bVal = b.current_value;
                     break;
                 case 'pnl':
                     aVal = a.unrealized_pnl;
@@ -136,7 +140,8 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                 <SortableHeader column="symbol" label={t('สินทรัพย์', 'Asset')} className="flex-1" />
                 <SortableHeader column="quantity" label={t('จำนวน', 'Quantity')} className="flex-1 justify-end" />
                 <SortableHeader column="avg_cost" label={t('ต้นทุนเฉลี่ย', 'Avg Cost')} className="flex-1 justify-end" />
-                <SortableHeader column="current_price" label={t('ราคาปัจจุบัน', 'Current Price')} className="flex-1 justify-end" />
+                <SortableHeader column="current_price" label={t('ราคาปัจจุบัน', 'Price')} className="flex-1 justify-end" />
+                <SortableHeader column="current_value" label={t('มูลค่าปัจจุบัน', 'Value')} className="flex-1 justify-end" />
                 <SortableHeader column="pnl" label={t('กำไร/ขาดทุน', 'P & L')} className="flex-1 justify-end" />
             </div>
 
@@ -152,7 +157,7 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
 
                     return (
                         <div
-                            key={`${asset.asset_type}-${asset.market || ''}-${asset.symbol}`}
+                            key={`${asset.asset_type}-${asset.market || ''}-${asset.symbol}-${asset.position_type || 'spot'}`}
                             className={`flex px-6 py-4 items-center transition-colors cursor-pointer ${bgHover} ${closedOpacity}`}
                             style={{ animationDelay: `${index * 50}ms` }}
                             onClick={() => onAssetSelect?.(asset)}
@@ -163,15 +168,6 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                                 <div>
                                     <div className="font-semibold text-white flex items-center gap-2">
                                         {asset.symbol}
-                                        {isClosed && (
-                                            <span className="text-[10px] px-1.5 py-0.5 bg-gray-600 text-gray-300 rounded uppercase font-medium">
-                                                {t('ขายแล้ว', 'Closed')}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="text-xs text-gray-500 flex items-center gap-2">
-                                        <span>{getAssetTypeName(asset.asset_type, settings.language)}</span>
-                                        {asset.market && <span>• {getMarketName(asset.market, settings.language).split(' ')[0]}</span>}
 
                                         {/* Position Type Badges */}
                                         {asset.position_type === 'long' && (
@@ -184,6 +180,16 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                                                 Short {asset.leverage && asset.leverage > 1 ? `${asset.leverage}x` : ''}
                                             </span>
                                         )}
+
+                                        {isClosed && (
+                                            <span className="text-[10px] px-1.5 py-0.5 bg-gray-600 text-gray-300 rounded uppercase font-medium">
+                                                {t('ขายแล้ว', 'Closed')}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="text-xs text-gray-500 flex items-center gap-2">
+                                        <span>{getAssetTypeName(asset.asset_type, settings.language)}</span>
+                                        {asset.market && <span>• {getMarketName(asset.market, settings.language).split(' ')[0]}</span>}
                                     </div>
                                 </div>
                             </div>
@@ -203,7 +209,6 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                                 )}
                             </div>
 
-                            {/* Current Price */}
                             <div className="flex-1 text-right">
                                 <div className="font-mono text-white flex items-center justify-end gap-1 whitespace-nowrap">
                                     {formatValue(asset.current_price)}
@@ -211,6 +216,11 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                                         {asset.current_price > asset.avg_cost ? '▲' : asset.current_price < asset.avg_cost ? '▼' : '—'}
                                     </span>
                                 </div>
+                            </div>
+
+                            {/* Current Value */}
+                            <div className="flex-1 text-right font-mono text-white">
+                                {formatValue(asset.current_value)}
                             </div>
 
                             {/* P&L */}

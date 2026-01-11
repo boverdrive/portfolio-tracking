@@ -44,7 +44,9 @@ export function calculatePnlMetrics(
         const shortQueue: { qty: number; price: number; id: string }[] = [];
 
         txs.forEach(tx => {
-            const multiplier = tx.leverage || 1;
+            // Only apply leverage multiplier for TFEX (Contract Size)
+            // For Crypto Futures, Qty is usually Position Size, so multiplier is 1.
+            const multiplier = tx.asset_type === 'tfex' ? (tx.leverage || 1) : 1;
             const action = tx.action.toLowerCase();
 
             // Initialize default metric

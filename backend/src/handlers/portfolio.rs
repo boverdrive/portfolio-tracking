@@ -137,7 +137,18 @@ pub async fn get_portfolio(
                 if asset.quantity > 0.0 {
                     let sell_value = tx.quantity * tx.price - tx.fees;
                     let cost_basis = tx.quantity * asset.avg_cost;
-                    let pnl = sell_value - cost_basis;
+                    
+                    // Reduce quantity and proportionally reduce fees
+                    // Logic: Removing a portion of the holding removes a portion of the "Open Cost" fees.
+                    let ratio = tx.quantity / asset.quantity;
+                    let fee_portion = asset.total_fees * ratio;
+                    asset.total_fees -= fee_portion;
+                    
+                    // PnL = (Sell Value - Fees) - (Cost Basis + Historical Buy Fees)
+                    // Note: sell_value calculation above already subtracted tx.fees (Sell Fees).
+                    // We must also subtract fee_portion (Historical Buy Fees) from the PnL.
+                    let pnl = sell_value - cost_basis - fee_portion;
+
                     realized_pnl += pnl;
                     
                     // Accumulate breakdown by currency
@@ -147,11 +158,6 @@ pub async fn get_portfolio(
                     *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
                     
                     asset.realized_pnl += pnl;
-                    
-                    // Reduce quantity and proportionally reduce fees
-                    // Logic: Removing a portion of the holding removes a portion of the "Open Cost" fees.
-                    let ratio = tx.quantity / asset.quantity;
-                    asset.total_fees -= asset.total_fees * ratio;
                     
                     asset.quantity -= tx.quantity;
                     asset.total_cost = (asset.quantity * asset.avg_cost) + asset.total_fees;
@@ -163,7 +169,16 @@ pub async fn get_portfolio(
                 if asset.quantity < 0.0 {
                     let buy_cost = tx.quantity * tx.price + tx.fees;
                     let short_value = tx.quantity * asset.avg_cost;  // Price we sold at * qty
-                    let pnl = short_value - buy_cost;
+                    
+                    // Reduce negative quantity (towards 0)
+                    let ratio = tx.quantity / asset.quantity.abs();
+                    let fee_portion = asset.total_fees * ratio; // Historical "Open Short" fees
+                    asset.total_fees -= fee_portion;
+
+                    // PnL = (Short Value) - (Buy Cost + Fees) - Historical Fees
+                    // buy_cost includes the Close fees. We must subtract Historical fees too.
+                    let pnl = short_value - buy_cost - fee_portion;
+
                     realized_pnl += pnl;
                     
                     // Accumulate breakdown by currency
@@ -171,12 +186,8 @@ pub async fn get_portfolio(
                         .or_else(|| tx.market.as_ref().map(|m| m.default_currency().to_string()))
                         .unwrap_or_else(|| "THB".to_string());
                     *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
-
+ 
                     asset.realized_pnl += pnl;
-                    
-                    // Reduce negative quantity (towards 0)
-                    let ratio = tx.quantity / asset.quantity.abs();
-                    asset.total_fees -= asset.total_fees * ratio;
                     
                     asset.quantity += tx.quantity;  // Add to reduce negative
                     asset.total_cost = (asset.quantity.abs() * asset.avg_cost) + asset.total_fees;

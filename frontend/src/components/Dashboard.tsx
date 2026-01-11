@@ -10,6 +10,7 @@ import AccountManager from '@/components/AccountManager';
 import PerformanceChart from '@/components/PerformanceChart';
 import Footer from '@/components/Footer';
 import AssetDetailsModal from '@/components/AssetDetailsModal';
+import PortfolioDetailsModal from '@/components/PortfolioDetailsModal';
 import { useSettings } from '@/contexts/SettingsContext';
 import {
     getPortfolio,
@@ -40,6 +41,7 @@ export default function Dashboard() {
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
     const [selectedAsset, setSelectedAsset] = useState<PortfolioAsset | null>(null);
+    const [selectedMetric, setSelectedMetric] = useState<'value' | 'invested' | 'unrealized' | 'realized' | null>(null);
 
     // Show closed positions toggle
     const [showClosedPositions, setShowClosedPositions] = useState(false);
@@ -122,15 +124,37 @@ export default function Dashboard() {
             });
         }
 
-        return assets.map(asset => ({
-            ...asset,
-            avg_cost: convertToDisplayCurrency(asset.avg_cost, asset.currency),
-            current_price: convertToDisplayCurrency(asset.current_price, asset.currency),
-            total_cost: convertToDisplayCurrency(asset.total_cost, asset.currency),
-            current_value: convertToDisplayCurrency(asset.current_value, asset.currency),
-            unrealized_pnl: convertToDisplayCurrency(asset.unrealized_pnl, asset.currency),
-            currency: displayCurrency,
-        }));
+        return assets.map(asset => {
+            const converted_avg_cost = convertToDisplayCurrency(asset.avg_cost, asset.currency);
+            const converted_current_price = convertToDisplayCurrency(asset.current_price, asset.currency);
+            const converted_total_cost = convertToDisplayCurrency(asset.total_cost, asset.currency);
+            const converted_current_value = convertToDisplayCurrency(asset.current_value, asset.currency);
+            const converted_realized_pnl = convertToDisplayCurrency(asset.realized_pnl, asset.currency);
+            const converted_total_fees = convertToDisplayCurrency(asset.total_fees, asset.currency);
+            const converted_unrealized_pnl = convertToDisplayCurrency(asset.unrealized_pnl, asset.currency);
+
+            // Recalculate PnL in display currency to prevent conversion mismatches (e.g. rate missing for PnL but present for Price)
+            // EXCEPTION: For TFEX, Total Cost is "Raw Cost" (without multiplier) but Current Value is "Notional" (with multiplier).
+            // Subtracting them directly gives nonsense results (~Notional Value).
+            // For TFEX, we must trust the Backend's PnL calculation (which handles Notional Cost correctly) and just convert it.
+            const derived_unrealized_pnl = asset.asset_type === 'tfex'
+                ? converted_unrealized_pnl
+                : converted_current_value - converted_total_cost;
+
+            return {
+                ...asset,
+                avg_cost: converted_avg_cost,
+                current_price: converted_current_price,
+                total_cost: converted_total_cost,
+                current_value: converted_current_value,
+                unrealized_pnl: derived_unrealized_pnl,
+                realized_pnl: converted_realized_pnl,
+                total_fees: converted_total_fees,
+                // Keep percentage from backend as it is currency-invariant and handles leverage logic (ROE) correctly
+                unrealized_pnl_percent: asset.unrealized_pnl_percent,
+                currency: displayCurrency,
+            };
+        });
     }, [portfolio, convertToDisplayCurrency, displayCurrency, accountSymbols]);
 
     // Convert portfolio data to display currency (calculated from filtered assets)
@@ -180,6 +204,7 @@ export default function Dashboard() {
             total_unrealized_pnl,
             total_unrealized_pnl_percent,
             total_realized_pnl,
+            realized_pnl_breakdown: !selectedAccountId ? portfolio?.summary.realized_pnl_breakdown : undefined,
             assets_count: filteredAssets.length,
         };
     }, [getConvertedAssets, selectedAccountId, portfolio, convertToDisplayCurrency]);
@@ -383,8 +408,10 @@ export default function Dashboard() {
                             </h2>
                             <PortfolioSummary
                                 summary={getConvertedSummary()}
+                                assets={getConvertedAssets()}
                                 isLoading={isLoading || isLoadingRates}
                                 displayCurrency={displayCurrency}
+                                onMetricSelect={setSelectedMetric}
                             />
                         </section>
 
@@ -540,6 +567,17 @@ export default function Dashboard() {
                     } : { assets: [selectedAsset] } as any}
                     displayCurrency={displayCurrency}
                     onClose={() => setSelectedAsset(null)}
+                />
+            )}
+
+            {/* Portfolio Details Modal */}
+            {selectedMetric && portfolio && (
+                <PortfolioDetailsModal
+                    metric={selectedMetric}
+                    summary={getConvertedSummary()}
+                    assets={getConvertedAssets()}
+                    displayCurrency={displayCurrency}
+                    onClose={() => setSelectedMetric(null)}
                 />
             )}
         </div>

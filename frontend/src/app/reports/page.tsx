@@ -24,6 +24,7 @@ export default function ReportsPage() {
         filter: (tx: Transaction) => boolean;
         type: 'tag' | 'card';
     } | null>(null);
+    const [modalSort, setModalSort] = useState<'date' | 'asset' | 'pnl'>('date');
 
     const currencyOptions = [
         { value: 'THB' as const, icon: '🇹🇭' },
@@ -215,10 +216,19 @@ export default function ReportsPage() {
             realizedPnl: number; unrealizedPnl: number;
         }> = {};
 
+        // Helper to convert to Base Currency
+        const toBase = (amount: number, currency: string) => {
+            if (currency === baseCurrency) return amount;
+            const rate = exchangeRates[currency] || exchangeRates[currency.toUpperCase()];
+            return rate ? amount / rate : 0;
+        };
+
         // Iterate filtered transactions to aggregate values
         filteredTransactions.forEach(tx => {
             const txTags = tx.tags?.length ? tx.tags : ['Untagged'];
-            const value = tx.quantity * tx.price * (tx.leverage || 1);
+            // Normalize value to Base Currency
+            const rawValue = tx.quantity * tx.price * (tx.leverage || 1);
+            const value = toBase(rawValue, getEffectiveCurrency(tx));
             const metrics = pnlMetrics[tx.id];
 
             txTags.forEach(tag => {
@@ -231,7 +241,7 @@ export default function ReportsPage() {
                     };
                 }
 
-                // Categorize by action type
+                // Categorize by action type (using normalized value)
                 switch (tx.action.toLowerCase()) {
                     case 'buy':
                         summary[tag].buys += value;
@@ -256,10 +266,13 @@ export default function ReportsPage() {
                         break;
                 }
 
-                summary[tag].fees += tx.fees;
+                // Normalize Fees
+                // Note: tx.fees is usually in the currency of the transaction/fee
+                // We assume getEffectiveCurrency(tx) applies to fees as well (simplified)
+                summary[tag].fees += toBase(tx.fees, getEffectiveCurrency(tx));
                 summary[tag].count += 1;
 
-                // Aggregate P&L from metrics
+                // Aggregate P&L from metrics (already normalized)
                 if (metrics) {
                     summary[tag].realizedPnl += metrics.realizedPnl;
                     summary[tag].unrealizedPnl += metrics.unrealizedPnl;
@@ -269,27 +282,32 @@ export default function ReportsPage() {
 
         return Object.entries(summary).map(([tag, data]) => {
             // Net P&L = Realized + Unrealized - Fees
-            // Note: Data.fees is in asset currency usually, but here we assume standardized or converted if needed.
-            // Ideally fees should be subtracted from P&L.
             const totalNet = data.realizedPnl + data.unrealizedPnl - data.fees;
 
             return {
                 tag,
                 ...data,
                 closes: data.closeLongs + data.closeShorts,
-                // Keep Spot/Futures net flow for reference if needed, or remove? 
-                // Keeping them but they are Cash Flow, not P&L.
                 spotNet: data.sells - data.buys,
                 futuresNet: (data.closeLongs - data.longs) + (data.shorts - data.closeShorts),
                 totalNet,
             };
         }).sort((a, b) => b.count - a.count);
-    }, [filteredTransactions, pnlMetrics]);
+    }, [filteredTransactions, pnlMetrics, exchangeRates, baseCurrency]);
 
     // Total summary
     const totalSummary = useMemo(() => {
+        // Helper to convert to Base Currency
+        const toBase = (amount: number, currency: string) => {
+            if (currency === baseCurrency) return amount;
+            const rate = exchangeRates[currency] || exchangeRates[currency.toUpperCase()];
+            return rate ? amount / rate : 0;
+        };
+
         return filteredTransactions.reduce((acc, tx) => {
-            const value = tx.quantity * tx.price * (tx.leverage || 1);
+            const rawValue = tx.quantity * tx.price * (tx.leverage || 1);
+            const value = toBase(rawValue, getEffectiveCurrency(tx));
+
             switch (tx.action) {
                 case 'buy':
                     acc.buys += value;
@@ -308,11 +326,11 @@ export default function ReportsPage() {
                     acc.closes += value;
                     break;
             }
-            acc.fees += tx.fees;
+            acc.fees += toBase(tx.fees, getEffectiveCurrency(tx));
             acc.count += 1;
             return acc;
         }, { buys: 0, sells: 0, longs: 0, shorts: 0, closes: 0, fees: 0, count: 0 });
-    }, [filteredTransactions]);
+    }, [filteredTransactions, exchangeRates, baseCurrency]);
 
     const toggleTag = (tag: string) => {
         setSelectedTags(prev =>
@@ -890,19 +908,59 @@ export default function ReportsPage() {
                                     </span>
                                     {modalState.title}
                                 </h3>
-                                <button
-                                    onClick={() => setModalState(null)}
-                                    className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700/50">
+                                        <button
+                                            onClick={() => setModalSort('date')}
+                                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${modalSort === 'date' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-300'
+                                                }`}
+                                        >
+                                            Date
+                                        </button>
+                                        <button
+                                            onClick={() => setModalSort('asset')}
+                                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${modalSort === 'asset' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-300'
+                                                }`}
+                                        >
+                                            Asset
+                                        </button>
+                                        <button
+                                            onClick={() => setModalSort('pnl')}
+                                            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${modalSort === 'pnl' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-300'
+                                                }`}
+                                        >
+                                            PnL
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => setModalState(null)}
+                                        className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-all"
+                                    >
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                                 <TransactionList
-                                    transactions={filteredTransactions.filter(modalState.filter)}
+                                    transactions={filteredTransactions
+                                        .filter(modalState.filter)
+                                        .sort((a, b) => {
+                                            if (modalSort === 'asset') {
+                                                return a.symbol.localeCompare(b.symbol);
+                                            }
+                                            if (modalSort === 'pnl') {
+                                                const pnlA = pnlMetrics[a.id]?.unrealizedPnl || pnlMetrics[a.id]?.realizedPnl || 0;
+                                                const pnlB = pnlMetrics[b.id]?.unrealizedPnl || pnlMetrics[b.id]?.realizedPnl || 0;
+                                                // Sort by value (High to Low, Algebraic)
+                                                return pnlB - pnlA;
+                                            }
+                                            // Date (descending)
+                                            return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+                                        })
+                                    }
                                     isLoading={false}
                                     displayCurrency={displayCurrency}
                                     convertToDisplayCurrency={convertToDisplayCurrency}

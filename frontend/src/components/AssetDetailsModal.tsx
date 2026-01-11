@@ -93,6 +93,7 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
         const holdingsQueue: { qty: number; price: number; id: string }[] = [];
 
         sorted.forEach(tx => {
+            // Apply leverage only for TFEX (Contract Size). Crypto Futures Qty = Position Size.
             const multiplier = asset.asset_type === 'tfex' ? (tx.leverage || 1) : 1;
             const txCurrency = getEffectiveCurrency(tx, settings.defaultCurrency);
 
@@ -244,7 +245,9 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
                         <div className="bg-gray-800/40 p-4 rounded-xl border border-gray-700/30">
                             <div className="text-sm text-gray-400 mb-1">{t('มูลค่ารวม', 'Total Value')}</div>
                             <div className="text-xl font-mono text-white">
-                                {formatValue(asset.quantity * asset.current_price)}
+                                {formatValue(
+                                    asset.quantity * asset.current_price * (asset.asset_type === 'tfex' ? (asset.leverage || 1) : 1)
+                                )}
                             </div>
                         </div>
                         <div className="bg-gray-800/40 p-4 rounded-xl border border-gray-700/30">

@@ -13,6 +13,9 @@ export default function AnalysisPage() {
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
+    const [selectedAssetType, setSelectedAssetType] = useState<string | null>(null);
+    const [realizedBreakdownData, setRealizedBreakdownData] = useState<{ accountName: string; items: any[] } | null>(null);
+    const [selectedMonthPerf, setSelectedMonthPerf] = useState<{ month: string; purchases: any[] } | null>(null);
 
     // Currency state
     const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
@@ -87,45 +90,62 @@ export default function AnalysisPage() {
     const analysis = useMemo(() => {
         if (!transactions.length) return null;
 
+        // Helper to convert to Base Currency (THB)
+        const toBase = (amount: number, currency: string) => {
+            if (currency === 'THB') return amount;
+            const rate = exchangeRates[currency] || exchangeRates[currency.toUpperCase()];
+            return rate ? amount / rate : amount; // Fallback to amount if rate missing (dangerous but better than 0)
+        };
+
+        const getTxCurrency = (tx: Transaction) => {
+            // Simple heuristic or helper if available
+            if (tx.currency) return tx.currency;
+            if (tx.market && ['binance', 'okx'].includes(tx.market.toLowerCase())) return 'USDT';
+            return 'THB';
+        };
+
         // Group transactions by symbol
-        const bySymbol: Record<string, { buys: number; sells: number; quantity: number; avgBuyPrice: number; totalBuyQty: number }> = {};
+        const bySymbol: Record<string, { buys: number; sells: number; quantity: number; totalBuyQty: number }> = {};
 
         transactions.forEach(tx => {
             if (!bySymbol[tx.symbol]) {
-                bySymbol[tx.symbol] = { buys: 0, sells: 0, quantity: 0, avgBuyPrice: 0, totalBuyQty: 0 };
+                bySymbol[tx.symbol] = { buys: 0, sells: 0, quantity: 0, totalBuyQty: 0 };
             }
-            const value = tx.quantity * tx.price * (tx.leverage || 1);
+
+            const currency = getTxCurrency(tx);
+            // Calculate Value in THB (Base)
+            // Fix: Only apply multiplier for TFEX. Crypto Futures Qty is Notional.
+            const multiplier = tx.asset_type === 'tfex' ? (tx.leverage || 1) : 1;
+            const rawValue = tx.quantity * tx.price * multiplier;
+            const value = toBase(rawValue, currency);
+
             if (isOpenAction(tx.action)) {
                 bySymbol[tx.symbol].buys += value;
                 bySymbol[tx.symbol].quantity += tx.quantity;
                 bySymbol[tx.symbol].totalBuyQty += tx.quantity;
             } else if (tx.action === 'short') {
-                // Short opens a negative position
                 bySymbol[tx.symbol].sells += value;
                 bySymbol[tx.symbol].quantity -= tx.quantity;
             } else {
-                // sell, close_long, close_short
                 bySymbol[tx.symbol].sells += value;
                 bySymbol[tx.symbol].quantity -= tx.quantity;
             }
         });
 
-        // Calculate average buy price
-        Object.keys(bySymbol).forEach(symbol => {
-            if (bySymbol[symbol].totalBuyQty > 0) {
-                bySymbol[symbol].avgBuyPrice = bySymbol[symbol].buys / bySymbol[symbol].totalBuyQty;
-            }
-        });
-
-        // Top performers (by profit/loss if we have current prices)
+        // Top performers
         const symbolStats = Object.entries(bySymbol).map(([symbol, data]) => {
             const asset = portfolio?.assets.find(a => a.symbol === symbol);
-            const currentValue = asset ? asset.current_price * data.quantity : 0;
+
+            // Calculate Current Value in THB (Base)
+            // Apply Multiplier (Leverage) ONLY for TFEX
+            const leverage = (asset && asset.asset_type === 'tfex') ? (asset.leverage || 1) : 1;
+            // Note: asset.current_price is in asset.currency. Need to convert.
+            const rawCurrentValue = asset ? asset.current_price * data.quantity * leverage : 0;
+            const currentValue = asset ? toBase(rawCurrentValue, asset.currency) : 0;
+
             const unrealizedPnL = currentValue - (data.buys - data.sells);
 
             // Calculate cost basis for PnL %
-            // For Long: cost is buys
-            // For Short: cost is approx. proceeds from sells (initial short value)
             let costBasis = data.buys;
             if (costBasis === 0 && data.quantity < 0) {
                 costBasis = data.sells;
@@ -163,7 +183,11 @@ export default function AnalysisPage() {
             if (!monthlyData[month]) {
                 monthlyData[month] = { buys: 0, sells: 0, count: 0 };
             }
-            const value = tx.quantity * tx.price * (tx.leverage || 1);
+            const currency = getTxCurrency(tx);
+            const multiplier = tx.asset_type === 'tfex' ? (tx.leverage || 1) : 1;
+            const rawValue = tx.quantity * tx.price * multiplier;
+            const value = toBase(rawValue, currency);
+
             if (isOpenAction(tx.action)) {
                 monthlyData[month].buys += value;
             } else {
@@ -177,11 +201,11 @@ export default function AnalysisPage() {
             .slice(0, 6)
             .reverse();
 
-        // Monthly Purchase Performance - track purchases by month with current value
+        // Monthly Purchase Performance
         const monthlyPurchasePerf: Record<string, {
             totalInvested: number;
             currentValue: number;
-            purchases: { symbol: string; qty: number; cost: number; currentValue: number }[]
+            purchases: { symbol: string; qty: number; cost: number; currentValue: number; date: string; assetType: string }[]
         }> = {};
 
         transactions.filter(tx => isOpenAction(tx.action)).forEach(tx => {
@@ -189,9 +213,24 @@ export default function AnalysisPage() {
             if (!monthlyPurchasePerf[month]) {
                 monthlyPurchasePerf[month] = { totalInvested: 0, currentValue: 0, purchases: [] };
             }
-            const cost = tx.quantity * tx.price + tx.fees;
+
             const asset = portfolio?.assets.find(a => a.symbol === tx.symbol);
-            const currValue = asset ? tx.quantity * asset.current_price : cost;
+            // Asset Value in THB
+            // Fix: Only apply multiplier for TFEX
+            const multiplier = (asset?.asset_type === 'tfex' || tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
+
+            const currency = getTxCurrency(tx);
+            const rawCost = (tx.quantity * tx.price * multiplier) + tx.fees;
+            const cost = toBase(rawCost, currency);
+
+            const assetPrice = asset ? asset.current_price : tx.price;
+            const assetCurrency = asset ? asset.currency : currency;
+
+            const rawCurrValue = tx.quantity * assetPrice * multiplier;
+
+            // If asset is missing, currValue uses cost (already toBase'd if we used tx.price).
+            // But here we reconstruct raw.
+            const currValue = toBase(rawCurrValue, assetCurrency);
 
             monthlyPurchasePerf[month].totalInvested += cost;
             monthlyPurchasePerf[month].currentValue += currValue;
@@ -199,7 +238,9 @@ export default function AnalysisPage() {
                 symbol: tx.symbol,
                 qty: tx.quantity,
                 cost,
-                currentValue: currValue
+                currentValue: currValue,
+                date: tx.timestamp,
+                assetType: tx.asset_type
             });
         });
 
@@ -210,7 +251,8 @@ export default function AnalysisPage() {
                 currentValue: data.currentValue,
                 pnl: data.currentValue - data.totalInvested,
                 pnlPercent: data.totalInvested > 0 ? ((data.currentValue - data.totalInvested) / data.totalInvested) * 100 : 0,
-                purchaseCount: data.purchases.length
+                purchaseCount: data.purchases.length,
+                purchases: data.purchases
             }))
             .sort((a, b) => b.month.localeCompare(a.month))
             .slice(0, 12);
@@ -219,7 +261,14 @@ export default function AnalysisPage() {
         const byAssetType: Record<string, number> = {};
         portfolio?.assets.forEach(asset => {
             const type = asset.asset_type;
-            const value = asset.current_price * asset.quantity;
+            // Value in THB
+            // Fix: Only apply multiplier for TFEX
+            const multiplier = asset.asset_type === 'tfex' ? (asset.leverage || 1) : 1;
+            const rawValue = asset.current_price * asset.quantity * multiplier;
+            // Actually Dashboard uses current_value from backend which has multiplier.
+            // But here we calculate from price + qty. So we MUST apply leverage.
+            const value = toBase(rawValue, asset.currency);
+
             byAssetType[type] = (byAssetType[type] || 0) + value;
         });
 
@@ -233,7 +282,7 @@ export default function AnalysisPage() {
             totalAssets: portfolio?.assets.length || 0,
             totalTransactions: transactions.length
         };
-    }, [transactions, portfolio]);
+    }, [transactions, portfolio, exchangeRates]);
 
     // Account Analysis - breakdown by account with spot/futures separation
     const accountAnalysis = useMemo(() => {
@@ -257,7 +306,12 @@ export default function AnalysisPage() {
 
             // Separate spot and futures based on action type
             const isFuturesAction = (action: string) => ['long', 'short', 'close_long', 'close_short'].includes(action.toLowerCase());
-            const spotTxs = accountTxs.filter(tx => !isFuturesAction(tx.action));
+            const spotTxs = accountTxs.filter(tx => !isFuturesAction(tx.action)).sort((a, b) => {
+                const timeA = new Date(a.timestamp).getTime();
+                const timeB = new Date(b.timestamp).getTime();
+                if (timeA !== timeB) return timeA - timeB;
+                return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+            });
             const futuresTxs = accountTxs.filter(tx => isFuturesAction(tx.action));
 
             // Debug: log XAG transactions
@@ -274,27 +328,50 @@ export default function AnalysisPage() {
                 })));
             }
 
-            // ========== SPOT ASSETS ==========
+            let spotRealizedPnL = 0;
+            const spotRealizedHistory: any[] = [];
             const spotHoldings = new Map<string, { quantity: number; costBasis: number; assetType: string; currency: string; transactions: Transaction[] }>();
 
             spotTxs.forEach(tx => {
                 const current = spotHoldings.get(tx.symbol) || { quantity: 0, costBasis: 0, assetType: tx.asset_type, currency: tx.currency || 'THB', transactions: [] };
                 current.transactions.push(tx);
 
-                // Convert cost from transaction currency to THB
                 const txCurrency = tx.currency || 'THB';
-                let costInTHB = tx.quantity * tx.price + tx.fees;
-                if (txCurrency !== 'THB' && exchangeRates[txCurrency]) {
-                    costInTHB = costInTHB / exchangeRates[txCurrency]; // Convert to THB
-                }
 
                 if (tx.action === 'buy') {
+                    // Cost includes fees
+                    let costInTHB = tx.quantity * tx.price + tx.fees;
+                    if (txCurrency !== 'THB' && exchangeRates[txCurrency]) {
+                        costInTHB = costInTHB / exchangeRates[txCurrency];
+                    }
                     current.quantity += tx.quantity;
                     current.costBasis += costInTHB;
                 } else if (tx.action === 'sell') {
-                    // Reduce holdings proportionally
+                    // Calculate Realized PnL
                     if (current.quantity > 0) {
+                        // Net proceeds needs to deduct fees
+                        let saleValueRaw = tx.quantity * tx.price - tx.fees;
+                        let saleValueInTHB = saleValueRaw;
+                        if (txCurrency !== 'THB' && exchangeRates[txCurrency]) {
+                            saleValueInTHB = saleValueRaw / exchangeRates[txCurrency];
+                        }
+
                         const soldRatio = Math.min(tx.quantity / current.quantity, 1);
+                        const cogs = current.costBasis * soldRatio;
+
+                        const pnlChunk = (saleValueInTHB - cogs);
+                        spotRealizedPnL += pnlChunk;
+
+                        spotRealizedHistory.push({
+                            symbol: tx.symbol,
+                            date: tx.timestamp,
+                            quantity: tx.quantity,
+                            sellValue: saleValueInTHB,
+                            costBasis: cogs,
+                            pnl: pnlChunk,
+                            currency: txCurrency
+                        });
+
                         current.costBasis *= (1 - soldRatio);
                     }
                     current.quantity -= tx.quantity;
@@ -405,12 +482,13 @@ export default function AnalysisPage() {
                 };
 
                 txs.forEach(tx => {
-                    const leverage = tx.leverage || 1;
+                    // Fix: Only apply leverage multiplier for TFEX
+                    const multiplier = tx.asset_type === 'tfex' ? (tx.leverage || 1) : 1;
 
                     if (tx.action === 'long') {
-                        longQueue.push({ quantity: tx.quantity, price: tx.price, leverage });
+                        longQueue.push({ quantity: tx.quantity, price: tx.price, leverage: multiplier });
                         // Add cost basis converted to THB
-                        totalCostBasis += toThb(tx.quantity * tx.price * leverage, txCurrency);
+                        totalCostBasis += toThb(tx.quantity * tx.price * multiplier, txCurrency);
                     } else if (tx.action === 'close_long') {
                         let remaining = tx.quantity;
                         while (remaining > 0 && longQueue.length > 0) {
@@ -428,8 +506,8 @@ export default function AnalysisPage() {
                             if (entry.quantity <= 0) longQueue.shift();
                         }
                     } else if (tx.action === 'short') {
-                        shortQueue.push({ quantity: tx.quantity, price: tx.price, leverage });
-                        totalCostBasis += toThb(tx.quantity * tx.price * leverage, txCurrency);
+                        shortQueue.push({ quantity: tx.quantity, price: tx.price, leverage: multiplier });
+                        totalCostBasis += toThb(tx.quantity * tx.price * multiplier, txCurrency);
                     } else if (tx.action === 'close_short') {
                         let remaining = tx.quantity;
                         while (remaining > 0 && shortQueue.length > 0) {
@@ -524,6 +602,7 @@ export default function AnalysisPage() {
             return {
                 account,
                 spotValue,
+                spotRealizedPnL,
                 spotUnrealizedPnL,
                 spotCostBasis,
                 futuresRealizedPnL,
@@ -532,8 +611,9 @@ export default function AnalysisPage() {
                 totalPnL,
                 goalProgress,
                 symbolBreakdown,
+                spotRealizedHistory,
             };
-        }).filter(a => a.spotValue !== 0 || a.futuresRealizedPnL !== 0 || a.futuresUnrealizedPnL !== 0 || a.account.target_value);
+        }).filter(a => a.spotValue !== 0 || a.futuresRealizedPnL !== 0 || a.futuresUnrealizedPnL !== 0 || a.spotRealizedPnL !== 0 || a.account.target_value);
     }, [accounts, transactions, portfolio, exchangeRates]);
 
     if (isLoading || isLoadingRates) {
@@ -598,8 +678,9 @@ export default function AnalysisPage() {
                                     <tr className="text-gray-400 text-sm">
                                         <th className="px-6 py-3 text-left">{t('บัญชี', 'Account')}</th>
                                         <th className="px-4 py-3 text-right">{t('Spot มูลค่า', 'Spot Value')}</th>
-                                        <th className="px-4 py-3 text-right">{t('Spot P&L', 'Spot P&L')}</th>
-                                        <th className="px-4 py-3 text-right">{t('Futures Realized', 'Futures Realized')}</th>
+                                        <th className="px-4 py-3 text-right text-cyan-400">{t('Spot Realized', 'Spot Realized')}</th>
+                                        <th className="px-4 py-3 text-right">{t('Spot Unrealized', 'Spot Unrealized')}</th>
+                                        <th className="px-4 py-3 text-right text-cyan-400">{t('Futures Realized', 'Futures Realized')}</th>
                                         <th className="px-4 py-3 text-right">{t('Futures Unrealized', 'Futures Unrealized')}</th>
                                         <th className="px-4 py-3 text-right">{t('รวม', 'Total')}</th>
                                         <th className="px-4 py-3 text-right">{t('เป้าหมาย', 'Goal')}</th>
@@ -632,6 +713,18 @@ export default function AnalysisPage() {
                                                 </td>
                                                 <td className="px-4 py-4 text-right text-white font-mono">
                                                     {formatCurrency(convertToDisplayCurrency(item.spotValue, item.account.target_currency), displayCurrency)}
+                                                </td>
+                                                <td
+                                                    className={`px-4 py-4 text-right font-mono ${(item.spotRealizedPnL || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'} cursor-pointer hover:underline`}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setRealizedBreakdownData({
+                                                            accountName: item.account.name,
+                                                            items: item.spotRealizedHistory || []
+                                                        });
+                                                    }}
+                                                >
+                                                    {(item.spotRealizedPnL || 0) >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency((item.spotRealizedPnL || 0), item.account.target_currency), displayCurrency)}
                                                 </td>
                                                 <td className={`px-4 py-4 text-right font-mono ${item.spotUnrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                                     {item.spotUnrealizedPnL >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.spotUnrealizedPnL, item.account.target_currency), displayCurrency)}
@@ -675,7 +768,7 @@ export default function AnalysisPage() {
                                             {/* Expanded Asset Breakdown */}
                                             {expandedAccountId === item.account.id && (item.symbolBreakdown?.length ?? 0) > 0 && (
                                                 <tr>
-                                                    <td colSpan={8} className="bg-gray-900/50 px-6 py-4">
+                                                    <td colSpan={9} className="bg-gray-900/50 px-6 py-4">
                                                         <div className="text-sm text-gray-400 mb-3 font-medium">
                                                             📊 {t('รายละเอียดสินทรัพย์', 'Asset Breakdown')} ({item.symbolBreakdown?.length ?? 0} {t('รายการ', 'items')})
                                                         </div>
@@ -734,6 +827,10 @@ export default function AnalysisPage() {
                                         <td className="px-6 py-3 text-white font-bold">{t('รวมทั้งหมด', 'Grand Total')}</td>
                                         <td className="px-4 py-3 text-right text-white font-bold font-mono">
                                             {formatCurrency(convertToDisplayCurrency(accountAnalysis.reduce((s, a) => s + a.spotValue, 0)), displayCurrency)}
+                                        </td>
+                                        <td className={`px-4 py-3 text-right font-mono font-bold ${accountAnalysis.reduce((s, a) => s + (a.spotRealizedPnL || 0), 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            {accountAnalysis.reduce((s, a) => s + (a.spotRealizedPnL || 0), 0) >= 0 ? '+' : ''}
+                                            {formatCurrency(convertToDisplayCurrency(accountAnalysis.reduce((s, a) => s + (a.spotRealizedPnL || 0), 0)), displayCurrency)}
                                         </td>
                                         <td className={`px-4 py-3 text-right font-mono font-bold ${accountAnalysis.reduce((s, a) => s + a.spotUnrealizedPnL, 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                             {accountAnalysis.reduce((s, a) => s + a.spotUnrealizedPnL, 0) >= 0 ? '+' : ''}
@@ -927,6 +1024,7 @@ export default function AnalysisPage() {
                                                     stroke="#1f2937"
                                                     strokeWidth="0.5"
                                                     className="transition-opacity hover:opacity-80 cursor-pointer"
+                                                    onClick={() => setSelectedAssetType(seg.type)}
                                                 />
                                             ))}
                                             {/* Center hole for donut effect */}
@@ -941,7 +1039,11 @@ export default function AnalysisPage() {
                                     <div className="flex-1 w-full">
                                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                             {segments.map((seg) => (
-                                                <div key={seg.type} className="bg-gray-700/30 rounded-lg p-3 flex items-center gap-3">
+                                                <div
+                                                    key={seg.type}
+                                                    className="bg-gray-700/30 rounded-lg p-3 flex items-center gap-3 cursor-pointer hover:bg-gray-700/50 transition-colors"
+                                                    onClick={() => setSelectedAssetType(seg.type)}
+                                                >
                                                     <div
                                                         className="w-4 h-4 rounded-full flex-shrink-0"
                                                         style={{ backgroundColor: seg.color }}
@@ -984,7 +1086,11 @@ export default function AnalysisPage() {
                                 </thead>
                                 <tbody>
                                     {analysis.monthlyPerformance.map((perf) => (
-                                        <tr key={perf.month} className="border-t border-gray-700/50 hover:bg-gray-700/20">
+                                        <tr
+                                            key={perf.month}
+                                            className="border-t border-gray-700/50 hover:bg-gray-700/20 cursor-pointer transition-colors"
+                                            onClick={() => setSelectedMonthPerf({ month: perf.month, purchases: perf.purchases })}
+                                        >
                                             <td className="px-6 py-3 text-white font-medium">{perf.month}</td>
                                             <td className="px-6 py-3 text-right text-gray-300">
                                                 {formatCurrency(convertToDisplayCurrency(perf.totalInvested), displayCurrency)}
@@ -1082,6 +1188,238 @@ export default function AnalysisPage() {
                     </div>
                 )}
             </main>
+            {/* Asset Type Details Modal */}
+            {selectedAssetType && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setSelectedAssetType(null)}>
+                    <div className="bg-gray-900 border border-gray-700/50 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-gray-800 flex items-center justify-between">
+                            <h3 className="text-xl font-bold text-white">
+                                {t('รายละเอียด', 'Details')}: {getAssetTypeName(selectedAssetType as any, settings.language)}
+                            </h3>
+                            <button onClick={() => setSelectedAssetType(null)} className="text-gray-400 hover:text-white">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto custom-scrollbar">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-800/50 text-gray-400">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left">{t('สินทรัพย์', 'Asset')}</th>
+                                            <th className="px-4 py-2 text-right">{t('จำนวน', 'Qty')}</th>
+                                            <th className="px-4 py-2 text-right">{t('ราคา', 'Price')}</th>
+                                            <th className="px-4 py-2 text-right">{t('ตัวคูณ', 'Multiplier')}</th>
+                                            <th className="px-4 py-2 text-right">{t('มูลค่าดิบ', 'Raw Value')}</th>
+                                            <th className="px-4 py-2 text-right">{t('อัตราแลกเปลี่ยน', 'Exch. Rate')}</th>
+                                            <th className="px-4 py-2 text-right text-white">{t('มูลค่า', 'Value')} ({displayCurrency})</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700/30">
+                                        {portfolio?.assets.filter(a => a.asset_type === selectedAssetType).map(asset => {
+                                            const multiplier = asset.asset_type === 'tfex' ? (asset.leverage || 1) : 1;
+                                            const rawValue = asset.quantity * asset.current_price * multiplier;
+
+                                            // Calculate THB Value manually to show rate
+                                            let valueInThb = rawValue;
+                                            let rate = 1;
+                                            let currency = asset.currency || 'THB';
+                                            if (currency === 'USDT' || currency === 'USDC') currency = 'USD';
+
+                                            if (currency !== 'THB' && exchangeRates[currency]) {
+                                                rate = exchangeRates[currency];
+                                                valueInThb = rawValue / rate;
+                                            }
+
+                                            return (
+                                                <tr key={asset.symbol} className="hover:bg-gray-800/30">
+                                                    <td className="px-4 py-3 font-medium text-white">
+                                                        {asset.symbol} <span className="text-gray-500 text-xs ml-1">{asset.market}</span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-300 font-mono">
+                                                        {formatNumber(asset.quantity)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-300 font-mono">
+                                                        {formatNumber(asset.current_price)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-400 font-mono">
+                                                        {multiplier > 1 ? `x${multiplier}` : '-'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-400 font-mono">
+                                                        {formatNumber(rawValue)} {asset.currency}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-400 font-mono">
+                                                        {currency !== 'THB' ? rate.toFixed(2) : '-'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-white font-bold font-mono">
+                                                        {formatCurrency(convertToDisplayCurrency(valueInThb), displayCurrency)}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {portfolio?.assets.filter(a => a.asset_type === selectedAssetType).length === 0 && (
+                                            <tr><td colSpan={7} className="text-center py-4 text-gray-500">No assets found</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Realized PnL Breakdown Modal */}
+            {realizedBreakdownData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setRealizedBreakdownData(null)}>
+                    <div className="bg-gray-900 border border-gray-700/50 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-gray-800 flex items-center justify-between">
+                            <h3 className="text-xl font-bold text-white">
+                                {t('รายละเอียด Spot Realized PnL', 'Spot Realized PnL Breakdown')} - {realizedBreakdownData.accountName}
+                            </h3>
+                            <button onClick={() => setRealizedBreakdownData(null)} className="text-gray-400 hover:text-white">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto custom-scrollbar">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-800/50 text-gray-400">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left">{t('วันที่', 'Date')}</th>
+                                            <th className="px-4 py-2 text-left">{t('Symbol', 'Symbol')}</th>
+                                            <th className="px-4 py-2 text-right">{t('จำนวนที่ขาย', 'Sold Qty')}</th>
+                                            <th className="px-4 py-2 text-right">{t('มูลค่าขาย (THB)', 'Sale Value (THB)')}</th>
+                                            <th className="px-4 py-2 text-right">{t('ต้นทุน (THB)', 'Cost Basis (THB)')}</th>
+                                            <th className="px-4 py-2 text-right">{t('กำไร/ขาดทุน', 'Realized PnL')}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700/30">
+                                        {realizedBreakdownData.items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((item, idx) => (
+                                            <tr key={idx} className="hover:bg-gray-800/30">
+                                                <td className="px-4 py-3 text-gray-400">
+                                                    {new Date(item.date).toLocaleDateString(settings.language === 'th' ? 'th-TH' : 'en-US', {
+                                                        year: 'numeric',
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    })}
+                                                </td>
+                                                <td className="px-4 py-3 font-medium text-white">{item.symbol}</td>
+                                                <td className="px-4 py-3 text-right text-gray-300 font-mono">
+                                                    {formatNumber(item.quantity)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-gray-300 font-mono">
+                                                    {formatCurrency(convertToDisplayCurrency(item.sellValue), displayCurrency)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-gray-400 font-mono">
+                                                    {formatCurrency(convertToDisplayCurrency(item.costBasis), displayCurrency)}
+                                                </td>
+                                                <td className={`px-4 py-3 text-right font-bold font-mono ${item.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {item.pnl >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(item.pnl), displayCurrency)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {realizedBreakdownData.items.length === 0 && (
+                                            <tr><td colSpan={6} className="text-center py-4 text-gray-500">{t('ไม่มีรายการ', 'No records found')}</td></tr>
+                                        )}
+                                    </tbody>
+                                    <tfoot className="bg-gray-800/50 border-t border-gray-700">
+                                        <tr>
+                                            <td colSpan={5} className="px-4 py-3 text-right text-white font-bold">{t('รวม', 'Total')}</td>
+                                            <td className={`px-4 py-3 text-right font-bold font-mono ${realizedBreakdownData.items.reduce((sum, i) => sum + i.pnl, 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                {realizedBreakdownData.items.reduce((sum, i) => sum + i.pnl, 0) >= 0 ? '+' : ''}
+                                                {formatCurrency(convertToDisplayCurrency(realizedBreakdownData.items.reduce((sum, i) => sum + i.pnl, 0)), displayCurrency)}
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Monthly Performance Details Modal */}
+            {selectedMonthPerf && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setSelectedMonthPerf(null)}>
+                    <div className="bg-gray-900 border border-gray-700/50 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-gray-800 flex items-center justify-between">
+                            <h3 className="text-xl font-bold text-white">
+                                {t('รายละเอียดการซื้อ', 'Purchase Details')} - {selectedMonthPerf.month}
+                            </h3>
+                            <button onClick={() => setSelectedMonthPerf(null)} className="text-gray-400 hover:text-white">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto custom-scrollbar">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-800/50 text-gray-400">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left">{t('วันที่', 'Date')}</th>
+                                            <th className="px-4 py-2 text-left">{t('Symbol', 'Symbol')}</th>
+                                            <th className="px-4 py-2 text-right">{t('จำนวน', 'Qty')}</th>
+                                            <th className="px-4 py-2 text-right">{t('ต้นทุน (THB)', 'Cost (THB)')}</th>
+                                            <th className="px-4 py-2 text-right">{t('มูลค่าปัจจุบัน', 'Current Value')}</th>
+                                            <th className="px-4 py-2 text-right text-cyan-400">{t('กำไร/ขาดทุน', 'P&L')}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-700/30">
+                                        {selectedMonthPerf.purchases.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((item, idx) => {
+                                            const pnl = item.currentValue - item.cost;
+                                            return (
+                                                <tr key={idx} className="hover:bg-gray-800/30">
+                                                    <td className="px-4 py-3 text-gray-400">
+                                                        {new Date(item.date).toLocaleDateString(settings.language === 'th' ? 'th-TH' : 'en-US', {
+                                                            year: 'numeric',
+                                                            month: 'short',
+                                                            day: 'numeric',
+                                                            hour: '2-digit',
+                                                            minute: '2-digit'
+                                                        })}
+                                                    </td>
+                                                    <td className="px-4 py-3 font-medium text-white">
+                                                        {item.symbol}
+                                                        <span className="text-xs text-gray-500 ml-2 border border-gray-700 rounded px-1">{getAssetTypeName(item.assetType as any, settings.language)}</span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-300 font-mono">
+                                                        {formatNumber(item.qty)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-300 font-mono">
+                                                        {formatCurrency(convertToDisplayCurrency(item.cost), displayCurrency)}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-400 font-mono">
+                                                        {formatCurrency(convertToDisplayCurrency(item.currentValue), displayCurrency)}
+                                                    </td>
+                                                    <td className={`px-4 py-3 text-right font-bold font-mono ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        {pnl >= 0 ? '+' : ''}{formatCurrency(convertToDisplayCurrency(pnl), displayCurrency)}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {selectedMonthPerf.purchases.length === 0 && (
+                                            <tr><td colSpan={6} className="text-center py-4 text-gray-500">{t('ไม่มีรายการ', 'No records found')}</td></tr>
+                                        )}
+                                    </tbody>
+                                    <tfoot className="bg-gray-800/50 border-t border-gray-700">
+                                        <tr>
+                                            <td colSpan={3} className="px-4 py-3 text-right text-white font-bold">{t('รวม', 'Total')}</td>
+                                            <td className="px-4 py-3 text-right text-white font-bold font-mono">
+                                                {formatCurrency(convertToDisplayCurrency(selectedMonthPerf.purchases.reduce((sum, i) => sum + i.cost, 0)), displayCurrency)}
+                                            </td>
+                                            <td className="px-4 py-3 text-right text-white font-bold font-mono">
+                                                {formatCurrency(convertToDisplayCurrency(selectedMonthPerf.purchases.reduce((sum, i) => sum + i.currentValue, 0)), displayCurrency)}
+                                            </td>
+                                            <td className={`px-4 py-3 text-right font-bold font-mono ${selectedMonthPerf.purchases.reduce((sum, i) => sum + (i.currentValue - i.cost), 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                {selectedMonthPerf.purchases.reduce((sum, i) => sum + (i.currentValue - i.cost), 0) >= 0 ? '+' : ''}
+                                                {formatCurrency(convertToDisplayCurrency(selectedMonthPerf.purchases.reduce((sum, i) => sum + (i.currentValue - i.cost), 0)), displayCurrency)}
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
