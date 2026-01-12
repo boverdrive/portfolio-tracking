@@ -49,7 +49,7 @@ impl PortfolioAsset {
     }
 
     /// Update P&L calculations based on current price (includes leverage/multiplier)
-    pub fn update_pnl(&mut self, current_price: f64) {
+    pub fn calculate_pnl(&mut self, current_price: f64) {
         self.current_price = current_price;
         
         match self.asset_type {
@@ -118,7 +118,7 @@ impl PortfolioAsset {
                 
                 // Net P&L
                 self.unrealized_pnl = gross_pnl - self.total_fees;
-                
+
                 // Percentage Calculation (ROE)
                 // Cost Basis for ROE is (Notional Cost / Leverage)
                 let leverage = if self.leverage <= 0.0 { 1.0 } else { self.leverage };

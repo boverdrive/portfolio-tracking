@@ -315,6 +315,9 @@ impl PocketBaseClient {
         if let Some(tags) = req.tags {
             transaction.tags = tags;
         }
+        if let Some(initial_margin) = req.initial_margin {
+            transaction.initial_margin = Some(initial_margin);
+        }
         
         transaction.updated_at = Utc::now();
         let updated = transaction.clone();

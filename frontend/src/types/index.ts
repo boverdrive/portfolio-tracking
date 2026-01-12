@@ -70,6 +70,7 @@ export interface Transaction {
   account_id?: string;
   tags?: string[];
   leverage?: number;  // Leverage multiplier for futures (e.g., 10, 20)
+  initial_margin?: number; // Actual money used for futures
   created_at: string;
   updated_at: string;
 }
@@ -89,6 +90,7 @@ export interface CreateTransactionRequest {
   account_id?: string;
   tags?: string[];
   leverage?: number;
+  initial_margin?: number;
 }
 
 export interface UpdateTransactionRequest {
@@ -105,6 +107,7 @@ export interface UpdateTransactionRequest {
   notes?: string;
   account_id?: string;
   tags?: string[];
+  initial_margin?: number;
 }
 
 // Portfolio models

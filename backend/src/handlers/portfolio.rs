@@ -94,59 +94,88 @@ pub async fn get_portfolio(
             TradeAction::Buy | TradeAction::Long => {
                 // Buy, Long (open buy) - increase long position
                 let new_quantity = asset.quantity + tx.quantity;
-                let purchase_cost = tx.quantity * tx.price;  // Cost without fees
                 
-                // Calculate weighted average cost (without fees)
-                let total_purchase_cost = (asset.quantity.abs() * asset.avg_cost) + purchase_cost;
-                asset.avg_cost = if new_quantity.abs() > 0.0 {
-                    total_purchase_cost / new_quantity.abs()
+                // Update Weighted Average Cost (PRICE)
+                // We MUST use Price for avg_cost to ensure P/L calculations are correct.
+                let current_notional = asset.quantity.abs() * asset.avg_cost;
+                let new_notional = tx.quantity * tx.price;
+                
+                if new_quantity.abs() > 0.0 {
+                    asset.avg_cost = (current_notional + new_notional) / new_quantity.abs();
                 } else {
-                    tx.price
+                    asset.avg_cost = tx.price;
+                }
+                
+                // Update Total Cost (Invested Amount / Margin)
+                // Use initial_margin ONLY for Leveraged assets (TFEX, Futures)
+                let use_margin = tx.asset_type == AssetType::Tfex || 
+                               (tx.asset_type == AssetType::Crypto && tx.leverage.unwrap_or(1.0) > 1.0);
+
+                let invest_amount = if use_margin && tx.initial_margin.is_some() {
+                    tx.initial_margin.unwrap()
+                } else {
+                    tx.quantity * tx.price
                 };
+                
+                // Add new investment + fees to total cost basis
+                asset.total_cost += invest_amount + tx.fees;
                 
                 // Track fees separately
                 asset.total_fees += tx.fees;
-                
-                // Total cost includes fees for P&L calculation
                 asset.quantity = new_quantity;
-                asset.total_cost = (asset.quantity.abs() * asset.avg_cost) + asset.total_fees;
             }
             TradeAction::Short => {
                 // Open Short - create/increase negative position
-                // Note: In Hedge mode, this bucket contains ONLY Short positions.
-                // quantity will be negative.
                 let new_quantity = asset.quantity - tx.quantity;  // Goes more negative
-                let short_value = tx.quantity * tx.price;
                 
-                // For short, avg_cost is the price at which we shorted.
-                // We add the new short value to the existing basis.
-                let total_short_cost = (asset.quantity.abs() * asset.avg_cost) + short_value;
-                asset.avg_cost = if new_quantity.abs() > 0.0 {
-                    total_short_cost / new_quantity.abs()
+                // Update Weighted Average Cost (PRICE)
+                let current_notional = asset.quantity.abs() * asset.avg_cost;
+                let new_notional = tx.quantity * tx.price;
+                
+                if new_quantity.abs() > 0.0 {
+                    asset.avg_cost = (current_notional + new_notional) / new_quantity.abs();
                 } else {
-                    tx.price
+                    asset.avg_cost = tx.price;
+                }
+                
+                // Update Total Cost (Invested Amount / Margin)
+                let use_margin = tx.asset_type == AssetType::Tfex || 
+                               (tx.asset_type == AssetType::Crypto && tx.leverage.unwrap_or(1.0) > 1.0);
+
+                let invest_amount = if use_margin && tx.initial_margin.is_some() {
+                    tx.initial_margin.unwrap()
+                } else {
+                    tx.quantity * tx.price
                 };
+                
+                asset.total_cost += invest_amount + tx.fees;
                 
                 asset.total_fees += tx.fees;
                 asset.quantity = new_quantity;
-                asset.total_cost = (asset.quantity.abs() * asset.avg_cost) + asset.total_fees;
             }
             TradeAction::Sell | TradeAction::CloseLong => {
                 // Sell, CloseLong - close long position
-                // This logic runs on "spot" or "long" buckets.
                 if asset.quantity > 0.0 {
+                    // Realized PnL Calculation
                     let sell_value = tx.quantity * tx.price - tx.fees;
-                    let cost_basis = tx.quantity * asset.avg_cost;
+                    let cost_basis = tx.quantity * asset.avg_cost; // Notional Cost (Entry Price * Qty)
                     
-                    // Reduce quantity and proportionally reduce fees
-                    // Logic: Removing a portion of the holding removes a portion of the "Open Cost" fees.
+                    // Reduce quantity
                     let ratio = tx.quantity / asset.quantity;
+                    
+                    // Reduce Fees proportionally
                     let fee_portion = asset.total_fees * ratio;
                     asset.total_fees -= fee_portion;
                     
+                    // Reduce Total Cost (Invested) proportionally
+                    // This correctly handles both Spot (Notional) and Futures (Margin)
+                    asset.total_cost -= asset.total_cost * ratio;
+                    
                     // PnL = (Sell Value - Fees) - (Cost Basis + Historical Buy Fees)
-                    // Note: sell_value calculation above already subtracted tx.fees (Sell Fees).
-                    // We must also subtract fee_portion (Historical Buy Fees) from the PnL.
+                    // Note: sell_value already extracted tx.fees. We subtract historical fees.
+                    // For Futures: PnL = (Exit - Entry) * Qty - Fees
+                    // This formula: (Price * Qty - SellFees) - (AvgPrice * Qty - BuyFees)
+                    // = (Price - AvgPrice) * Qty - (SellFees + BuyFees). Correct.
                     let pnl = sell_value - cost_basis - fee_portion;
 
                     realized_pnl += pnl;
@@ -158,25 +187,27 @@ pub async fn get_portfolio(
                     *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
                     
                     asset.realized_pnl += pnl;
-                    
                     asset.quantity -= tx.quantity;
-                    asset.total_cost = (asset.quantity * asset.avg_cost) + asset.total_fees;
                 }
             }
             TradeAction::CloseShort => {
                 // CloseShort - buy to close short position
-                // This logic runs on "short" bucket where quantity is negative.
                 if asset.quantity < 0.0 {
-                    let buy_cost = tx.quantity * tx.price + tx.fees;
+                    let buy_cost = tx.quantity * tx.price + tx.fees; // Cost to close
                     let short_value = tx.quantity * asset.avg_cost;  // Price we sold at * qty
                     
                     // Reduce negative quantity (towards 0)
                     let ratio = tx.quantity / asset.quantity.abs();
-                    let fee_portion = asset.total_fees * ratio; // Historical "Open Short" fees
+                    
+                    let fee_portion = asset.total_fees * ratio;
                     asset.total_fees -= fee_portion;
+                    
+                    // Reduce Total Cost (Invested) proportionally
+                    asset.total_cost -= asset.total_cost * ratio;
 
                     // PnL = (Short Value) - (Buy Cost + Fees) - Historical Fees
-                    // buy_cost includes the Close fees. We must subtract Historical fees too.
+                    // = (AvgPrice * Qty) - (ExitPrice * Qty + CloseFees) - BuyFees
+                    // = (AvgPrice - ExitPrice) * Qty - TotalFees. Correct.
                     let pnl = short_value - buy_cost - fee_portion;
 
                     realized_pnl += pnl;
@@ -188,9 +219,7 @@ pub async fn get_portfolio(
                     *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
  
                     asset.realized_pnl += pnl;
-                    
-                    asset.quantity += tx.quantity;  // Add to reduce negative
-                    asset.total_cost = (asset.quantity.abs() * asset.avg_cost) + asset.total_fees;
+                    asset.quantity += tx.quantity;
                 }
             }
         }
@@ -272,13 +301,13 @@ pub async fn get_portfolio(
             // Thai stocks/TFEX/Foreign stocks: PocketBase first, then API fallback
             if let Some(price) = pb_price {
                 tracing::debug!("📊 Using PB price for {}: {}", asset.symbol, price);
-                asset.update_pnl(price);
+                asset.calculate_pnl(price);
                 found_price = true;
             } else {
                 // Try API as fallback
                 if let Ok(price_entry) = state.price_service.get_price(&asset.symbol, &asset.asset_type, asset.market.as_ref()).await {
                     tracing::debug!("📊 API price for {}: {} {}", asset.symbol, price_entry.price, price_entry.currency);
-                    asset.update_pnl(price_entry.price);
+                    asset.calculate_pnl(price_entry.price);
                     asset.currency = price_entry.currency.clone();  // Update currency to match price source
                     found_price = true;
                 }
@@ -288,7 +317,7 @@ pub async fn get_portfolio(
             match state.price_service.get_price(&asset.symbol, &asset.asset_type, asset.market.as_ref()).await {
                 Ok(price_entry) => {
                     tracing::debug!("📊 API price for {}: {} {}", asset.symbol, price_entry.price, price_entry.currency);
-                    asset.update_pnl(price_entry.price);
+                    asset.calculate_pnl(price_entry.price);
                     asset.currency = price_entry.currency.clone();  // Update currency to match price source
                     found_price = true;
                 }
@@ -296,7 +325,7 @@ pub async fn get_portfolio(
                     tracing::warn!("API price fetch failed for {}: {}, trying PB", asset.symbol, e);
                     if let Some(price) = pb_price {
                         tracing::debug!("📊 Using PB price for {}: {}", asset.symbol, price);
-                        asset.update_pnl(price);
+                        asset.calculate_pnl(price);
                         found_price = true;
                     }
                 }
@@ -306,7 +335,7 @@ pub async fn get_portfolio(
         // Final fallback: use avg_cost so P&L shows as 0
         if !found_price {
             tracing::warn!("No price found for {}, using avg_cost as fallback", asset.symbol);
-            asset.update_pnl(asset.avg_cost);
+            asset.calculate_pnl(asset.avg_cost);
         }
     }
     

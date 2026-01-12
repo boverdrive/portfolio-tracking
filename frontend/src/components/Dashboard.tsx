@@ -134,10 +134,11 @@ export default function Dashboard() {
             const converted_unrealized_pnl = convertToDisplayCurrency(asset.unrealized_pnl, asset.currency);
 
             // Recalculate PnL in display currency to prevent conversion mismatches (e.g. rate missing for PnL but present for Price)
-            // EXCEPTION: For TFEX, Total Cost is "Raw Cost" (without multiplier) but Current Value is "Notional" (with multiplier).
-            // Subtracting them directly gives nonsense results (~Notional Value).
-            // For TFEX, we must trust the Backend's PnL calculation (which handles Notional Cost correctly) and just convert it.
-            const derived_unrealized_pnl = asset.asset_type === 'tfex'
+            // EXCEPTION: For TFEX and Crypto Futures, Total Cost is "Raw Cost" or "Margin" but Current Value is "Notional".
+            // Subtracting them directly gives nonsense results. We must trust the Backend's PnL.
+            const isFutures = asset.asset_type === 'tfex' || (asset.asset_type === 'crypto' && (asset.leverage || 1) > 1);
+
+            const derived_unrealized_pnl = isFutures
                 ? converted_unrealized_pnl
                 : converted_current_value - converted_total_cost;
 

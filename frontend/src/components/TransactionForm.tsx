@@ -84,6 +84,9 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
     const [feesStr, setFeesStr] = useState(() =>
         (editTransaction && editTransaction.fees > 0) ? String(editTransaction.fees) : ''
     );
+    const [initialMarginStr, setInitialMarginStr] = useState(() =>
+        (editTransaction && editTransaction.initial_margin) ? String(editTransaction.initial_margin) : ''
+    );
     const [tagInput, setTagInput] = useState('');
     const [isFetchingPrice, setIsFetchingPrice] = useState(false);
 
@@ -129,6 +132,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 account_id: editTransaction.account_id,
                 tags: editTransaction.tags || [],
                 leverage: editTransaction.leverage,
+                initial_margin: editTransaction.initial_margin,
             };
         }
         return {
@@ -166,10 +170,12 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 account_id: editTransaction.account_id,
                 tags: editTransaction.tags || [],
                 leverage: editTransaction.leverage,
+                initial_margin: editTransaction.initial_margin,
             });
             setQuantityStr(String(editTransaction.quantity));
             setPriceStr(String(editTransaction.price));
             setFeesStr(editTransaction.fees > 0 ? String(editTransaction.fees) : '');
+            setInitialMarginStr((editTransaction.initial_margin) ? String(editTransaction.initial_margin) : '');
 
             // Set leverage string for TFEX or futures
             if (editTransaction.leverage) {
@@ -177,13 +183,17 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             } else if (editTransaction.asset_type === 'tfex' && editTransaction.symbol) {
                 const multiplier = getTfexMultiplier(editTransaction.symbol);
                 setLeverageStr(String(multiplier));
+            } else {
+                setLeverageStr('');
             }
 
             // Set futures mode for crypto
-            if (editTransaction.asset_type === 'crypto' &&
-                (editTransaction.action === 'long' || editTransaction.action === 'short' ||
-                    editTransaction.action === 'close_long' || editTransaction.action === 'close_short')) {
-                setIsFuturesMode(true);
+            if (editTransaction.asset_type === 'crypto') {
+                const isFutures = editTransaction.action === 'long' || editTransaction.action === 'short' ||
+                    editTransaction.action === 'close_long' || editTransaction.action === 'close_short';
+                setIsFuturesMode(isFutures);
+            } else {
+                setIsFuturesMode(false);
             }
         }
     }, [editTransaction]);
@@ -414,6 +424,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             const defaultMarkets = getMarketsByAssetType('stock');
             setQuantityStr('');
             setPriceStr('');
+            setInitialMarginStr('');
             setFormData({
                 asset_type: 'stock',
                 symbol: '',
@@ -421,6 +432,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 quantity: 0,
                 price: 0,
                 fees: 0,
+                initial_margin: undefined,
                 market: defaultMarkets[0],
                 currency: 'THB',
                 timestamp: getCurrentDateTimeLocal(),
@@ -651,6 +663,32 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     </div>
                 )}
 
+                {/* Initial Margin (Actual Money Used) - For Futures */}
+                {(formData.asset_type === 'tfex' || (formData.asset_type === 'crypto' && isFuturesMode)) && (
+                    <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-2">{t('เงินหลักประกัน (Initial Margin)', 'Initial Margin')}</label>
+                        <input
+                            type="text"
+                            inputMode="decimal"
+                            value={initialMarginStr}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                    setInitialMarginStr(val);
+                                    const num = parseFloat(val);
+                                    if (!isNaN(num)) {
+                                        setFormData(prev => ({ ...prev, initial_margin: num }));
+                                    } else if (val === '') {
+                                        setFormData(prev => ({ ...prev, initial_margin: undefined }));
+                                    }
+                                }
+                            }}
+                            placeholder={t('จำนวนเงินที่วางจริง (ไม่รวม Leverage)', 'Actual money used (excluding leverage)')}
+                            className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                        />
+                    </div>
+                )}
+
                 {/* Crypto Futures Toggle */}
                 {formData.asset_type === 'crypto' && (
                     <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
@@ -665,8 +703,9 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                     setIsFuturesMode(!isFuturesMode);
                                     // Reset action to buy when switching off futures mode
                                     if (isFuturesMode) {
-                                        setFormData(prev => ({ ...prev, action: 'buy', leverage: undefined }));
+                                        setFormData(prev => ({ ...prev, action: 'buy', leverage: undefined, initial_margin: undefined }));
                                         setLeverageStr('');
+                                        setInitialMarginStr('');
                                     } else {
                                         setFormData(prev => ({ ...prev, action: 'long' }));
                                     }
@@ -707,7 +746,12 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                             setFormData(prev => ({ ...prev, leverage: isNaN(val) ? undefined : val }));
                                         }}
                                         placeholder={t('อื่นๆ', 'Custom')}
-                                        className="w-20 px-2 py-2 text-sm bg-gray-700 border border-gray-600 rounded-lg text-white text-center focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500"
+                                        className={`w-24 px-3 py-2 text-base font-bold rounded-lg text-center transition-all outline-none border-2 ${
+                                            // Highlight when custom value is active (not one of the presets)
+                                            leverageStr && ![5, 10, 20, 50, 100].includes(Number(leverageStr))
+                                                ? 'bg-purple-600/20 border-purple-500 text-purple-300 shadow-sm'
+                                                : 'bg-gray-700 border-gray-600 text-white focus:border-purple-500'
+                                            }`}
                                     />
                                 </div>
                             </div>

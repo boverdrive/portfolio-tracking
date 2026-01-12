@@ -155,6 +155,8 @@ pub struct Transaction {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub leverage: Option<f64>,         // Leverage multiplier for futures (e.g., 10x, 20x)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_margin: Option<f64>,   // Actual money used for futures
     #[serde(default, skip_serializing)]
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing)]
@@ -180,6 +182,7 @@ pub struct CreateTransactionRequest {
     #[serde(default)]
     pub tags: Vec<String>,
     pub leverage: Option<f64>,
+    pub initial_margin: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,6 +201,7 @@ pub struct UpdateTransactionRequest {
     pub account_id: Option<String>,
     pub tags: Option<Vec<String>>,
     pub leverage: Option<f64>,
+    pub initial_margin: Option<f64>,
 }
 
 impl Transaction {
@@ -228,6 +232,7 @@ impl Transaction {
             account_id: req.account_id,
             tags: req.tags,
             leverage: req.leverage,
+            initial_margin: req.initial_margin,
             created_at: now,
             updated_at: now,
         }

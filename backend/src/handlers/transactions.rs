@@ -163,3 +163,52 @@ pub async fn get_transactions_by_type(
     
     Ok(Json(filtered))
 }
+/// Bulk create transactions
+pub async fn create_transactions_bulk(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(reqs): Json<Vec<CreateTransactionRequest>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let user_id = extract_user_id(&state, &headers)?;
+    let mut success_count = 0;
+    let mut errors = Vec::new();
+
+    // Limit batch size to prevent overloading
+    if reqs.len() > 1000 {
+        return Err(AppError::BadRequest("Batch size exceeds limit (1000)".to_string()));
+    }
+
+    // Pre-load symbols once to ensure cache is warm
+    let _ = state.symbols_service.load_symbols().await;
+    tracing::info!("Starting bulk import of {} transactions", reqs.len());
+
+    for (index, mut req) in reqs.into_iter().enumerate() {
+        // Basic validation
+        if req.quantity <= 0.0 {
+            errors.push(format!("Row {}: Quantity must be positive", index + 1));
+            continue;
+        }
+        if req.price <= 0.0 {
+            errors.push(format!("Row {}: Price must be positive", index + 1));
+            continue;
+        }
+
+        // Auto-populate symbol_name if missing
+        if req.symbol_name.is_none() || req.symbol_name.as_ref().is_some_and(|n| n.is_empty()) {
+            if let Some(symbol_data) = state.symbols_service.lookup_symbol(&req.symbol).await {
+                req.symbol_name = Some(symbol_data.name);
+            }
+        }
+
+        match state.db.create_transaction(req, &user_id).await {
+            Ok(_) => success_count += 1,
+            Err(e) => errors.push(format!("Row {}: {}", index + 1, e)),
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "count": success_count,
+        "errors": errors
+    })))
+}

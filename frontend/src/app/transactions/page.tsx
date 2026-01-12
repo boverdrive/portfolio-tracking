@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import TransactionForm from '@/components/TransactionForm';
 import TransactionList from '@/components/TransactionList';
+import TransactionImportModal from '@/components/TransactionImportModal';
 import Header from '@/components/Header';
 import { useSettings } from '@/contexts/SettingsContext';
 import { getTransactions, getPortfolio, deleteTransaction, getAssetTypeName, getAllExchangeRates, DisplayCurrency } from '@/lib/api';
@@ -15,6 +16,7 @@ export default function TransactionsPage() {
     const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
+    const [showImportModal, setShowImportModal] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -98,6 +100,44 @@ export default function TransactionsPage() {
 
         return valueInThb * rate;
     }, [displayCurrency, exchangeRates]);
+
+    // Export Handler
+    const handleExport = () => {
+        if (transactions.length === 0) return;
+
+        // CSV Header
+        const headers = ['Date', 'Action', 'Symbol', 'Market', 'Quantity', 'Price', 'Fees', 'Currency', 'Notes', 'Leverage', 'Initial Margin', 'AssetType'];
+
+        // CSV Rows
+        const rows = transactions.map(tx => [
+            new Date(tx.timestamp).toISOString().split('T')[0],
+            tx.action,
+            tx.symbol,
+            tx.market || '',
+            tx.quantity,
+            tx.price,
+            tx.fees,
+            tx.currency || 'THB',
+            `"${(tx.notes || '').replace(/"/g, '""')}"`, // Escape quotes
+            tx.leverage || 1,
+            tx.initial_margin || '',
+            tx.asset_type
+        ]);
+
+        const csvContent = [
+            headers.join(','),
+            ...rows.map(r => r.join(','))
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `transactions_export_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
 
     // Get all unique tags
     const allTags = useMemo(() => {
@@ -231,6 +271,26 @@ export default function TransactionsPage() {
                                             </svg>
                                             {t('เพิ่มรายการ', 'Add Transaction')}
                                         </button>
+                                        <div className="flex bg-gray-700/50 rounded-lg p-1 gap-1">
+                                            <button
+                                                onClick={() => setShowImportModal(true)}
+                                                className="p-1.5 text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors"
+                                                title={t('นำเข้า CSV', 'Import CSV')}
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                onClick={handleExport}
+                                                className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 rounded transition-colors"
+                                                title={t('ส่งออก CSV', 'Export CSV')}
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -319,6 +379,16 @@ export default function TransactionsPage() {
                     </div>
                 </div>
             </main>
+
+            {/* Import Modal */}
+            {showImportModal && (
+                <TransactionImportModal
+                    onClose={() => setShowImportModal(false)}
+                    onSuccess={() => {
+                        fetchData(); // Reload data
+                    }}
+                />
+            )}
         </div>
     );
 }

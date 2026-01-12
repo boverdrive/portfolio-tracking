@@ -191,6 +191,7 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                                         <span>{getAssetTypeName(asset.asset_type, settings.language)}</span>
                                         {asset.market && <span>• {getMarketName(asset.market, settings.language).split(' ')[0]}</span>}
                                     </div>
+
                                 </div>
                             </div>
 

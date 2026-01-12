@@ -78,6 +78,15 @@ export async function createTransaction(
     });
 }
 
+export async function createTransactionsBulk(
+    data: CreateTransactionRequest[]
+): Promise<{ success: boolean; count: number; errors: string[] }> {
+    return fetchApi<{ success: boolean; count: number; errors: string[] }>('/api/transactions/bulk', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
 export async function updateTransaction(
     id: string,
     data: UpdateTransactionRequest

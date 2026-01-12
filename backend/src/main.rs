@@ -128,6 +128,7 @@ async fn main() {
         .route("/api/auth/change-password", post(handlers::change_password))
         
         // Transaction routes
+        .route("/api/transactions/bulk", post(handlers::create_transactions_bulk))
         .route("/api/transactions", get(handlers::list_transactions))
         .route("/api/transactions", post(handlers::create_transaction))
         .route("/api/transactions/:id", get(handlers::get_transaction))

@@ -8,3 +8,4 @@ pocketbase
 *.db
 *.db-journal
 test_*.rs
+*.log
