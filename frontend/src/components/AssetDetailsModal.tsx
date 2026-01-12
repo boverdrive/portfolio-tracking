@@ -11,10 +11,12 @@ interface Props {
     asset: PortfolioAsset;
     portfolio?: PortfolioResponse | null;
     displayCurrency?: DisplayCurrency;
+
     onClose: () => void;
+    onAddDividend?: (asset: PortfolioAsset) => void;
 }
 
-export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 'THB', onClose }: Props) {
+export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 'THB', onClose, onAddDividend }: Props) {
     const { t, settings } = useSettings();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -43,7 +45,7 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
                             asset.position_type === 'short' ? (tx.action === 'short' || tx.action === 'close_short') :
                                 asset.position_type === 'long' ? (tx.action === 'long' || tx.action === 'close_long') :
                                     // For spot or legacy, include buy/sell and legacy/mixed types if strictly not long/short bucket
-                                    (tx.action === 'buy' || tx.action === 'sell')
+                                    (tx.action === 'buy' || tx.action === 'sell' || tx.action === 'dividend')
                         )
                     )
                     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -221,21 +223,35 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
                             </p>
                         </div>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
-                    >
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
+
+                    <div className="flex items-center gap-2">
+                        {onAddDividend && (
+                            <button
+                                onClick={() => onAddDividend(asset)}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition-all text-sm font-medium"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                                {t('รับปันผล', 'Add Dividend')}
+                            </button>
+                        )}
+                        <button
+                            onClick={onClose}
+                            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
 
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div className="bg-gray-800/40 p-4 rounded-xl border border-gray-700/30">
                             <div className="text-sm text-gray-400 mb-1">{t('จำนวนที่ถือครอง', 'Quantity')}</div>
                             <div className="text-xl font-mono text-white">
@@ -254,6 +270,12 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
                             <div className="text-sm text-gray-400 mb-1">{t('ต้นทุนเฉลี่ย', 'Avg Cost')}</div>
                             <div className="text-xl font-mono text-white">
                                 {formatValue(asset.avg_cost)}
+                            </div>
+                        </div>
+                        <div className="bg-gray-800/40 p-4 rounded-xl border border-gray-700/30">
+                            <div className="text-sm text-gray-400 mb-1">{t('ปันผลรวม', 'Total Dividend')}</div>
+                            <div className="text-xl font-mono text-emerald-400">
+                                +{formatCurrency(convertToDisplayCurrency(asset.realized_dividend || 0, asset.currency), displayCurrency)}
                             </div>
                         </div>
                         <div className="bg-gray-800/40 p-4 rounded-xl border border-gray-700/30">
@@ -339,5 +361,6 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
                 </div>
             </div>
         </div>
+
     );
 }

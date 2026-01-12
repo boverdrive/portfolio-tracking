@@ -19,7 +19,7 @@ import {
     getAllExchangeRates,
     DisplayCurrency,
 } from '@/lib/api';
-import { Transaction, PortfolioResponse, PortfolioAsset, PortfolioSummary as PortfolioSummaryType } from '@/types';
+import { Transaction, PortfolioResponse, PortfolioAsset, PortfolioSummary as PortfolioSummaryType, CreateTransactionRequest } from '@/types';
 
 export default function Dashboard() {
     const { t, displayCurrency, setDisplayCurrency } = useSettings();
@@ -39,9 +39,10 @@ export default function Dashboard() {
 
     // Editing transaction
     const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+    const [initialFormValues, setInitialFormValues] = useState<Partial<CreateTransactionRequest> | undefined>(undefined);
 
     const [selectedAsset, setSelectedAsset] = useState<PortfolioAsset | null>(null);
-    const [selectedMetric, setSelectedMetric] = useState<'value' | 'invested' | 'unrealized' | 'realized' | null>(null);
+    const [selectedMetric, setSelectedMetric] = useState<'value' | 'invested' | 'unrealized' | 'realized' | 'dividend' | null>(null);
 
     // Show closed positions toggle
     const [showClosedPositions, setShowClosedPositions] = useState(false);
@@ -132,6 +133,8 @@ export default function Dashboard() {
             const converted_realized_pnl = convertToDisplayCurrency(asset.realized_pnl, asset.currency);
             const converted_total_fees = convertToDisplayCurrency(asset.total_fees, asset.currency);
             const converted_unrealized_pnl = convertToDisplayCurrency(asset.unrealized_pnl, asset.currency);
+            const converted_realized_dividend = convertToDisplayCurrency(asset.realized_dividend || 0, asset.currency);
+
 
             // Recalculate PnL in display currency to prevent conversion mismatches (e.g. rate missing for PnL but present for Price)
             // EXCEPTION: For TFEX and Crypto Futures, Total Cost is "Raw Cost" or "Margin" but Current Value is "Notional".
@@ -151,6 +154,7 @@ export default function Dashboard() {
                 unrealized_pnl: derived_unrealized_pnl,
                 realized_pnl: converted_realized_pnl,
                 total_fees: converted_total_fees,
+                realized_dividend: converted_realized_dividend,
                 // Keep percentage from backend as it is currency-invariant and handles leverage logic (ROE) correctly
                 unrealized_pnl_percent: asset.unrealized_pnl_percent,
                 currency: displayCurrency,
@@ -177,6 +181,8 @@ export default function Dashboard() {
         const total_invested = filteredAssets.reduce((sum, asset) => sum + asset.total_cost, 0);
         const total_current_value = filteredAssets.reduce((sum, asset) => sum + asset.current_value, 0);
         const total_unrealized_pnl = filteredAssets.reduce((sum, asset) => sum + asset.unrealized_pnl, 0);
+        const total_dividend = filteredAssets.reduce((sum, asset) => sum + (asset.realized_dividend || 0), 0);
+
         const total_unrealized_pnl_percent = total_invested > 0
             ? (total_unrealized_pnl / total_invested) * 100
             : 0;
@@ -205,6 +211,7 @@ export default function Dashboard() {
             total_unrealized_pnl,
             total_unrealized_pnl_percent,
             total_realized_pnl,
+            total_dividend,
             realized_pnl_breakdown: !selectedAccountId ? portfolio?.summary.realized_pnl_breakdown : undefined,
             assets_count: filteredAssets.length,
         };
@@ -251,12 +258,27 @@ export default function Dashboard() {
 
     const handleEditTransaction = (transaction: Transaction) => {
         setEditingTransaction(transaction);
+        setInitialFormValues(undefined);
+        setShowForm(true);
+    };
+
+    const handleAddDividend = (asset: PortfolioAsset) => {
+        setInitialFormValues({
+            asset_type: asset.asset_type,
+            symbol: asset.symbol,
+            market: asset.market,
+            action: 'dividend',
+            currency: asset.currency
+        });
+        setEditingTransaction(null);
+        setSelectedAsset(null); // Close modal
         setShowForm(true);
     };
 
     const handleCloseForm = () => {
         setShowForm(false);
         setEditingTransaction(null);
+        setInitialFormValues(undefined);
     };
 
     const currencyOptions: { value: DisplayCurrency; label: string; icon: string }[] = [
@@ -523,6 +545,8 @@ export default function Dashboard() {
                                     onClose={handleCloseForm}
                                     defaultAccountId={selectedAccountId || undefined}
                                     editTransaction={editingTransaction}
+                                    initialValues={initialFormValues}
+                                    portfolioAssets={portfolio?.assets}
                                 />
                             </div>
                         )}
@@ -540,6 +564,8 @@ export default function Dashboard() {
                                 onClose={handleCloseForm}
                                 defaultAccountId={selectedAccountId || undefined}
                                 editTransaction={editingTransaction}
+                                initialValues={initialFormValues}
+                                portfolioAssets={portfolio?.assets}
                             />
                         </div>
                     </div>
@@ -567,7 +593,9 @@ export default function Dashboard() {
                         )
                     } : { assets: [selectedAsset] } as any}
                     displayCurrency={displayCurrency}
+
                     onClose={() => setSelectedAsset(null)}
+                    onAddDividend={handleAddDividend}
                 />
             )}
 

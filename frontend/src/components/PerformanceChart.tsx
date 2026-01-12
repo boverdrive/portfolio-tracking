@@ -243,52 +243,62 @@ export default function PerformanceChart({ displayCurrency = 'THB', className = 
                                         fill="transparent"
                                         onMouseEnter={() => setHoveredIndex(i)}
                                     />
-                                    {hoveredIndex === i && (
-                                        <>
-                                            <line
-                                                x1={x}
-                                                y1={0}
-                                                x2={x}
-                                                y2={100}
-                                                stroke="#6b7280"
-                                                strokeWidth="0.2"
-                                                strokeDasharray="2,2"
-                                            />
-                                            <circle
-                                                cx={x}
-                                                cy={y}
-                                                r="1.5"
-                                                fill={isPositive ? '#10b981' : '#f43f5e'}
-                                                stroke="white"
-                                                strokeWidth="0.3"
-                                            />
-                                        </>
-                                    )}
                                 </g>
                             );
                         })}
                     </svg>
 
-                    {/* Tooltip */}
+                    {/* Active Line & Dot (HTML Overlay to avoid SVG distortion) */}
                     {hoveredIndex !== null && chartData.points[hoveredIndex] && (
-                        <div
-                            className="absolute bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm shadow-xl pointer-events-none z-10"
-                            style={{
-                                left: `${chartData.points.length <= 1 ? 50 : (hoveredIndex / (chartData.points.length - 1)) * 100}%`,
-                                top: '10px',
-                                transform: 'translateX(-50%)',
-                            }}
-                        >
-                            <div className="text-gray-400 text-xs">{formatDate(chartData.points[hoveredIndex].date)}</div>
-                            <div className="text-white font-semibold">
-                                {formatCurrency(chartData.points[hoveredIndex].value, displayCurrency)}
+                        <>
+                            {(() => {
+                                const index = hoveredIndex;
+                                const point = chartData.points[index];
+                                const x = getXPosition(index, chartData.points.length);
+                                const range = chartData.max - chartData.min || 1;
+                                const y = 100 - 5 - ((point.value - chartData.min) / range) * 90;
+
+                                return (
+                                    <>
+                                        {/* Vertical Line */}
+                                        <div
+                                            className="absolute top-0 bottom-0 border-l border-dashed border-gray-500 pointer-events-none"
+                                            style={{ left: `${x}%`, borderColor: '#6b7280' }}
+                                        />
+                                        {/* Dot */}
+                                        <div
+                                            className={`absolute w-3 h-3 rounded-full border-2 border-white pointer-events-none ${isPositive ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                                            style={{
+                                                left: `${x}%`,
+                                                top: `${y}%`,
+                                                transform: 'translate(-50%, -50%)',
+                                                boxShadow: '0 0 0 2px rgba(0,0,0,0.3)'
+                                            }}
+                                        />
+                                    </>
+                                );
+                            })()}
+
+                            {/* Tooltip */}
+                            <div
+                                className="absolute bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm shadow-xl pointer-events-none z-10"
+                                style={{
+                                    left: `${chartData.points.length <= 1 ? 50 : (hoveredIndex / (chartData.points.length - 1)) * 100}%`,
+                                    top: '10px',
+                                    transform: 'translateX(-50%)',
+                                }}
+                            >
+                                <div className="text-gray-400 text-xs">{formatDate(chartData.points[hoveredIndex].date)}</div>
+                                <div className="text-white font-semibold">
+                                    {formatCurrency(chartData.points[hoveredIndex].value, displayCurrency)}
+                                </div>
+                                <div className={`text-xs ${chartData.points[hoveredIndex].pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {chartData.points[hoveredIndex].pnl >= 0 ? '+' : ''}
+                                    {formatCurrency(chartData.points[hoveredIndex].pnl, displayCurrency)}
+                                    {' '}({chartData.points[hoveredIndex].pnlPercent.toFixed(2)}%)
+                                </div>
                             </div>
-                            <div className={`text-xs ${chartData.points[hoveredIndex].pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {chartData.points[hoveredIndex].pnl >= 0 ? '+' : ''}
-                                {formatCurrency(chartData.points[hoveredIndex].pnl, displayCurrency)}
-                                {' '}({chartData.points[hoveredIndex].pnlPercent.toFixed(2)}%)
-                            </div>
-                        </div>
+                        </>
                     )}
                 </div>
 

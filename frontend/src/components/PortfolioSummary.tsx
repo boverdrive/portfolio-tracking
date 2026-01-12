@@ -5,13 +5,12 @@ import { PortfolioSummary as PortfolioSummaryType, PortfolioAsset } from '@/type
 import { formatCurrency, formatPercent, DisplayCurrency, getAssetTypeName, getMarketName } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
 import AssetLogo from '@/components/AssetLogo';
-
 interface Props {
     summary: PortfolioSummaryType;
     assets?: PortfolioAsset[];
     isLoading?: boolean;
     displayCurrency?: DisplayCurrency;
-    onMetricSelect?: (metric: 'value' | 'invested' | 'unrealized' | 'realized') => void;
+    onMetricSelect?: (metric: 'value' | 'invested' | 'unrealized' | 'realized' | 'dividend') => void;
 }
 
 export default function PortfolioSummary({ summary, assets = [], isLoading, displayCurrency = 'THB', onMetricSelect }: Props) {
@@ -26,8 +25,8 @@ export default function PortfolioSummary({ summary, assets = [], isLoading, disp
 
     if (isLoading) {
         return (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[...Array(4)].map((_, i) => (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                {[...Array(5)].map((_, i) => (
                     <div key={i} className="bg-gray-800/50 rounded-xl p-6 animate-pulse">
                         <div className="h-4 bg-gray-700 rounded w-1/2 mb-3"></div>
                         <div className="h-8 bg-gray-700 rounded w-3/4"></div>
@@ -46,7 +45,7 @@ export default function PortfolioSummary({ summary, assets = [], isLoading, disp
         : 'bg-rose-500/10 border-rose-500/20';
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             {/* Total Value */}
             <div
                 onClick={() => onMetricSelect?.('value')}
@@ -114,6 +113,22 @@ export default function PortfolioSummary({ summary, assets = [], isLoading, disp
                 </div>
                 <div className={`text-2xl font-bold group-hover:scale-105 origin-left transition-transform ${summary.total_realized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {formatValue(summary.total_realized_pnl)}
+                </div>
+            </div>
+
+            {/* Total Dividend */}
+            <div
+                onClick={() => onMetricSelect?.('dividend')}
+                className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 backdrop-blur-sm rounded-xl p-6 border border-gray-700/50 shadow-lg cursor-pointer hover:border-amber-500/30 hover:shadow-amber-500/10 transition-all group"
+            >
+                <div className="flex items-center gap-2 text-gray-400 text-sm mb-2 group-hover:text-amber-400 transition-colors">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {t('เงินปันผลรวม', 'Total Dividend')}
+                </div>
+                <div className="text-2xl font-bold text-amber-400 group-hover:scale-105 origin-left transition-transform">
+                    {formatValue(summary.total_dividend || 0)}
                 </div>
             </div>
         </div>

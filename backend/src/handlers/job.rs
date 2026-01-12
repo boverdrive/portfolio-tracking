@@ -33,7 +33,21 @@ pub async fn update_job(
     Path(id): Path<String>,
     Json(req): Json<UpdateJobRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    match state.job_scheduler.update_job(&id, req.interval_seconds, req.enabled).await {
+    // Parse schedule_times from Value
+    let schedule_times = match req.schedule_times {
+        Some(serde_json::Value::Null) => Some(None), // Explicit null -> None (clear)
+        Some(serde_json::Value::Array(arr)) => {
+            // Convert Value array to Vec<String>
+            let times: Vec<String> = arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            Some(Some(times)) // Value -> Some(vec)
+        },
+        Some(_) => None, // Invalid type -> ignore
+        None => None, // Missing -> ignore
+    };
+
+    match state.job_scheduler.update_job(&id, req.interval_seconds, req.enabled, schedule_times).await {
         Ok(job) => Ok(Json(json!(job))),
         Err(e) => Err(AppError::Internal(e)),
     }

@@ -6,7 +6,7 @@ import { formatCurrency, formatPercent, getAssetTypeName, DisplayCurrency } from
 import AssetLogo from '@/components/AssetLogo';
 
 interface Props {
-    metric: 'value' | 'invested' | 'unrealized' | 'realized';
+    metric: 'value' | 'invested' | 'unrealized' | 'realized' | 'dividend';
     summary: PortfolioSummary;
     assets: PortfolioAsset[];
     displayCurrency: DisplayCurrency;
@@ -24,13 +24,18 @@ export default function PortfolioDetailsModal({ metric, summary, assets, display
     };
 
     // Helper to get top assets for breakdown
-    const getTopAssets = (metric: 'value' | 'unrealized') => {
+    const getTopAssets = (metric: 'value' | 'unrealized' | 'dividend' | 'invested') => {
         if (!assets) return [];
         const sorted = [...assets].sort((a, b) => {
             if (metric === 'value') return b.current_value - a.current_value;
+            if (metric === 'invested') return b.total_cost - a.total_cost;
+            if (metric === 'dividend') return (b.realized_dividend || 0) - (a.realized_dividend || 0);
             // For PnL, sort by absolute impact but keep sign
             return Math.abs(b.unrealized_pnl) - Math.abs(a.unrealized_pnl);
         });
+
+        // Return all assets for dividend (filtered by > 0 below), top 5 for others
+        if (metric === 'dividend') return sorted.filter(a => (a.realized_dividend || 0) > 0);
         return sorted.slice(0, 5); // Top 5
     };
 
@@ -62,7 +67,50 @@ export default function PortfolioDetailsModal({ metric, summary, assets, display
             );
         }
 
-        const metricAssets = getTopAssets(metric === 'value' || metric === 'invested' ? 'value' : 'unrealized');
+        if (metric === 'dividend') {
+            const dividendAssets = getTopAssets('dividend');
+            const totalDividend = dividendAssets.reduce((sum, a) => sum + (a.realized_dividend || 0), 0);
+
+            if (dividendAssets.length === 0) {
+                return <div className="text-center py-8 text-gray-500 text-sm">{t('ยังไม่มีข้อมูลเงินปันผล', 'No dividend data available')}</div>;
+            }
+
+            return (
+                <div className="space-y-3">
+                    <div className="mb-4 flex justify-between items-end border-b border-gray-700/50 pb-2">
+                        <span className="text-sm text-gray-400">{t('รวมทั้งหมด', 'Total')}</span>
+                        <span className="text-xl font-bold text-amber-400">{formatCurrency(totalDividend, displayCurrency)}</span>
+                    </div>
+                    <div className="text-sm text-gray-400 mb-2">{t('สินทรัพย์', 'Assets')}</div>
+                    {dividendAssets.map(asset => {
+                        const percent = totalDividend > 0 ? ((asset.realized_dividend || 0) / totalDividend) * 100 : 0;
+                        return (
+                            <div key={asset.symbol} className="flex items-center justify-between p-2 hover:bg-gray-700/30 rounded-lg transition-colors">
+                                <div className="flex items-center gap-3">
+                                    <AssetLogo symbol={asset.symbol} assetType={asset.asset_type} size="sm" />
+                                    <div>
+                                        <div className="font-medium text-white">{asset.symbol}</div>
+                                        <div className="text-xs text-gray-500">
+                                            {getAssetTypeName(asset.asset_type, settings.language)}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="font-mono text-sm text-emerald-400">
+                                        +{formatCurrency(asset.realized_dividend || 0, displayCurrency)}
+                                    </div>
+                                    <div className="text-xs text-amber-500/80">
+                                        {percent.toFixed(1)}%
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        }
+
+        const metricAssets = getTopAssets(metric);
 
         return (
             <div className="space-y-3">
@@ -90,7 +138,11 @@ export default function PortfolioDetailsModal({ metric, summary, assets, display
                                 </>
                             ) : (
                                 <div className="font-mono text-white text-sm">
-                                    {formatValue(asset.current_value)}
+                                    {/* Display Total Cost for 'invested', Current Value for 'value' */}
+                                    {metric === 'invested'
+                                        ? formatValue(asset.total_cost)
+                                        : formatValue(asset.current_value)
+                                    }
                                 </div>
                             )}
                         </div>
@@ -101,7 +153,7 @@ export default function PortfolioDetailsModal({ metric, summary, assets, display
     };
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={onClose}>
             <div className="bg-gray-800 rounded-xl border border-gray-700 shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between p-4 border-b border-gray-700">
                     <h3 className="font-semibold text-white">
@@ -109,6 +161,7 @@ export default function PortfolioDetailsModal({ metric, summary, assets, display
                         {metric === 'invested' && t('เงินลงทุนสูงสุด', 'Top Assets by Cost')}
                         {metric === 'unrealized' && t('กำไร/ขาดทุนสูงสุด', 'Top Movers')}
                         {metric === 'realized' && t('รายละเอียดกำไรที่รับรู้', 'Realized P&L Details')}
+                        {metric === 'dividend' && t('รายละเอียดเงินปันผล', 'Dividend Breakdown')}
                     </h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

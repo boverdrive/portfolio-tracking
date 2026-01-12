@@ -60,6 +60,7 @@ pub async fn get_portfolio(
             TradeAction::Buy | TradeAction::Sell => "spot",
             TradeAction::Long | TradeAction::CloseLong => "long",
             TradeAction::Short | TradeAction::CloseShort => "short",
+            TradeAction::Dividend => "spot",
         };
         
         let market_key = tx.market.as_ref().map(|m| m.to_string()).unwrap_or_default();
@@ -187,7 +188,7 @@ pub async fn get_portfolio(
                     *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
                     
                     asset.realized_pnl += pnl;
-                    asset.quantity -= tx.quantity;
+                    asset.quantity -= ratio * asset.quantity.abs(); // reduce towards 0
                 }
             }
             TradeAction::CloseShort => {
@@ -221,6 +222,17 @@ pub async fn get_portfolio(
                     asset.realized_pnl += pnl;
                     asset.quantity += tx.quantity;
                 }
+            }
+            TradeAction::Dividend => {
+                // Dividend - pure income, does not affect position size or cost basis
+                // We use 'price' field to store the Dividend Amount
+                // We typically set quantity to 1.0 or ignore it
+                let amount = tx.price; 
+                
+                asset.realized_dividend += amount;
+                
+                // Dividends are technically realized gains, but we track them separate from Capital Gains PnL
+                // If we want total return, we sum them up in UI
             }
         }
     }
@@ -354,6 +366,7 @@ pub async fn get_portfolio(
         summary.total_invested += asset.total_cost;
         summary.total_current_value += asset.current_value;
         summary.total_unrealized_pnl += asset.unrealized_pnl;
+        summary.total_dividend += asset.realized_dividend;
     }
     
     summary.calculate_percent();

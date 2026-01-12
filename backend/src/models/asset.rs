@@ -22,6 +22,8 @@ pub struct PortfolioAsset {
     pub leverage: f64,        // Leverage/multiplier for futures
     #[serde(default = "default_position_type")]
     pub position_type: String, // "spot", "long", "short"
+    #[serde(default)]
+    pub realized_dividend: f64, // Total dividends received
 }
 
 fn default_leverage() -> f64 { 1.0 }
@@ -45,6 +47,7 @@ impl PortfolioAsset {
             realized_pnl: 0.0,
             leverage: 1.0,
             position_type: "spot".to_string(),
+            realized_dividend: 0.0,
         }
     }
 
@@ -180,6 +183,7 @@ pub struct PortfolioSummary {
     pub total_unrealized_pnl_percent: f64,
     pub total_realized_pnl: f64,
     pub realized_pnl_breakdown: std::collections::HashMap<String, f64>,
+    pub total_dividend: f64,
     pub assets_count: usize,
 }
 
@@ -192,6 +196,7 @@ impl PortfolioSummary {
             total_unrealized_pnl_percent: 0.0,
             total_realized_pnl: 0.0,
             realized_pnl_breakdown: std::collections::HashMap::new(),
+            total_dividend: 0.0,
             assets_count: 0,
         }
     }

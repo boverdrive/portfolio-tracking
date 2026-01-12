@@ -143,6 +143,7 @@ pub struct JobRunHistory {
 pub struct UpdateJobRequest {
     pub interval_seconds: Option<u64>,
     pub enabled: Option<bool>,
+    pub schedule_times: Option<serde_json::Value>, // Use Value to distinguish null vs missing vs array
 }
 
 /// API status check result for a single endpoint

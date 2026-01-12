@@ -60,14 +60,14 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
     return (
         <div className="space-y-3">
             {transactions.map((tx, index) => {
-                // Check if it's a "positive" action (buy/long) or "negative" action (sell/short/close)
-                const isPositive = tx.action === 'buy' || tx.action === 'long';
+                // Check if it's a "positive" action (buy/long/dividend) or "negative" action (sell/short/close)
+                const isPositive = tx.action === 'buy' || tx.action === 'long' || tx.action === 'dividend';
                 // For TFEX, leverage = contract multiplier (affects value). For Crypto, it's just financial leverage.
                 const valueMultiplier = (tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
                 const displayLeverage = tx.leverage || 1;
                 // Determine effective currency (handle cases where API returns 'THB' for USDT pairs)
                 const effectiveTxCurrency = getEffectiveCurrency(tx, 'THB');
-                const totalValue = tx.quantity * tx.price * valueMultiplier;
+                const totalValue = (tx.action === 'dividend') ? tx.price : (tx.quantity * tx.price * valueMultiplier);
 
                 // P&L Calculation logic
                 let pnl = 0;
@@ -131,6 +131,7 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                         case 'short': return { label: 'Short', color: 'bg-rose-500/20 text-rose-400' };
                         case 'close_long': return { label: t('ปิด Long', 'Close Long'), color: 'bg-amber-500/20 text-amber-400' };
                         case 'close_short': return { label: t('ปิด Short', 'Close Short'), color: 'bg-purple-500/20 text-purple-400' };
+                        case 'dividend': return { label: t('รับปันผล', 'Dividend'), color: 'bg-amber-500/20 text-amber-400' };
                         default: return { label: tx.action, color: 'bg-gray-500/20 text-gray-400' };
                     }
                 };
@@ -164,15 +165,27 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                                     </span>
                                 </div>
                                 <div className="text-sm text-gray-400">
-                                    {tx.quantity.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 8 })} × {formatCurrency(
-                                        convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price,
-                                        displayCurrency
-                                    )}
-                                    {displayLeverage > 1 && (
-                                        <span className="text-amber-400 ml-1">(×{displayLeverage})</span>
+                                    {tx.action === 'dividend' ? (
+                                        <span className="text-emerald-400 font-medium">
+                                            {formatCurrency(
+                                                convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price,
+                                                displayCurrency
+                                            )}
+                                        </span>
+                                    ) : (
+                                        <>
+                                            {tx.quantity.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 8 })} × {formatCurrency(
+                                                convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price,
+                                                displayCurrency
+                                            )}
+                                            {displayLeverage > 1 && (
+                                                <span className="text-amber-400 ml-1">(×{displayLeverage})</span>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                                 {(() => {
+                                    if (tx.action === 'dividend') return null;
                                     const asset = portfolio?.assets.find(a => a.symbol === tx.symbol && a.asset_type === tx.asset_type);
                                     if (asset?.current_price && (isPositive || (transactionMetrics?.[tx.id]?.remainingQty || 0) > 0)) {
                                         const entryPrice = convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price;
@@ -203,13 +216,14 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
 
                             {/* Value & P&L */}
                             <div className="text-right">
-                                <div className="font-mono text-white font-medium">
-                                    {convertToDisplayCurrency
+                                <div className={`font-mono font-medium ${tx.action === 'dividend' ? 'text-emerald-400 font-bold' : 'text-white'}`}>
+                                    {tx.action === 'dividend' ? '+' : ''}{convertToDisplayCurrency
                                         ? formatCurrency(convertToDisplayCurrency(totalValue, effectiveTxCurrency), displayCurrency)
                                         : formatCurrency(totalValue, effectiveTxCurrency || 'THB')
                                     }
                                 </div>
                                 {(() => {
+                                    if (tx.action === 'dividend') return null;
                                     const asset = portfolio?.assets.find(a => a.symbol === tx.symbol && a.asset_type === tx.asset_type);
                                     if (asset?.current_price && (isPositive || (transactionMetrics?.[tx.id]?.remainingQty || 0) > 0)) {
                                         const currentVal = tx.quantity * asset.current_price * valueMultiplier;

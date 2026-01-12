@@ -245,7 +245,8 @@ impl JobScheduler {
     }
 
     /// Update job configuration
-    pub async fn update_job(&self, id: &str, interval_seconds: Option<u64>, enabled: Option<bool>) -> Result<JobConfig, String> {
+    /// Update job configuration
+    pub async fn update_job(&self, id: &str, interval_seconds: Option<u64>, enabled: Option<bool>, schedule_times: Option<Option<Vec<String>>>) -> Result<JobConfig, String> {
         let mut jobs = self.jobs.write().await;
         
         if let Some(job) = jobs.get_mut(id) {
@@ -260,11 +261,48 @@ impl JobScheduler {
                     job.status = JobStatus::Idle;
                 }
             }
+            if let Some(times_opt) = schedule_times {
+                job.schedule_times = times_opt;
+            }
             
             // Calculate next run time
             if job.enabled {
-                let next_run = Utc::now() + chrono::Duration::seconds(job.interval_seconds as i64);
-                job.next_run = Some(next_run.to_rfc3339());
+                // If using schedule_times, we need to find the next scheduled time from NOW
+                if let Some(times) = &job.schedule_times {
+                     if times.is_empty() {
+                         // No times set? Fallback to interval or just wait
+                         job.next_run = None;
+                     } else {
+                         // Find next time in list
+                         let now = Utc::now();
+                         let current_date = now.format("%Y-%m-%d").to_string();
+                         
+                         // Create candidates for today and tomorrow
+                         let mut candidates = Vec::new();
+                         for time_str in times {
+                             // Try today
+                             if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&format!("{} {}:00", current_date, time_str), "%Y-%m-%d %H:%M:%S") {
+                                 let dt_utc = DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc); // Assuming times are UTC? Or local? Frontend sends HH:MM.
+                                 // Let's assume Local for user convenience but server is UTC.
+                                 // For simplicity MVP, assume input is UTC or server local match.
+                                 // Ideally we should handle timezone.
+                                 // Given the current implementation checks `current_time = now.format("%H:%M")`, it implies everything is UTC or consistent timezone.
+                                 // Let's stick to the simpler logic: just set next_run to "Informational".
+                                 
+                                 // Actually the loop logic handles execution. `next_run` is mostly for display in UI.
+                                 // We'll leave next_run update simplified or properly calc it.
+                                 // Let's stick to interval logic fallback for next_run display or try to calc it.
+                                 candidates.push(dt_utc);
+                                 candidates.push(dt_utc + chrono::Duration::days(1));
+                             }
+                         }
+                         candidates.sort();
+                         job.next_run = candidates.into_iter().find(|t| *t > now).map(|t| t.to_rfc3339());
+                     }
+                } else {
+                    let next_run = Utc::now() + chrono::Duration::seconds(job.interval_seconds as i64);
+                    job.next_run = Some(next_run.to_rfc3339());
+                }
             } else {
                 job.next_run = None;
             }

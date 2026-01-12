@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { AssetType, TradeAction, Market, CreateTransactionRequest, Account, Transaction } from '@/types';
+import { AssetType, TradeAction, Market, CreateTransactionRequest, Account, Transaction, PortfolioAsset } from '@/types';
 import { createTransaction, updateTransaction, getAssetTypeName, getMarketName, getMarketsByAssetType, getAssetTypeColor, getAccounts } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
 
@@ -40,6 +40,8 @@ interface Props {
     onClose?: () => void;
     defaultAccountId?: string;
     editTransaction?: Transaction | null;
+    portfolioAssets?: PortfolioAsset[];
+    initialValues?: Partial<CreateTransactionRequest>;
 }
 
 // Helper to get current datetime in local format for input
@@ -66,7 +68,7 @@ const getTfexMultiplier = (symbol: string): number => {
     return 1;
 };
 
-export default function TransactionForm({ onSuccess, onClose, defaultAccountId, editTransaction }: Props) {
+export default function TransactionForm({ onSuccess, onClose, defaultAccountId, editTransaction, portfolioAssets, initialValues }: Props) {
     const { t, settings } = useSettings();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -135,6 +137,26 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 initial_margin: editTransaction.initial_margin,
             };
         }
+
+        if (initialValues) {
+            return {
+                asset_type: initialValues.asset_type || 'stock',
+                symbol: initialValues.symbol || '',
+                symbol_name: initialValues.symbol_name,
+                action: initialValues.action || 'buy',
+                quantity: initialValues.quantity || 0,
+                price: initialValues.price || 0,
+                fees: initialValues.fees || 0,
+                market: initialValues.market,
+                currency: initialValues.currency || 'THB',
+                timestamp: initialValues.timestamp || getCurrentDateTimeLocal(),
+                notes: initialValues.notes || '',
+                account_id: initialValues.account_id || defaultAccountId,
+                tags: initialValues.tags || [],
+                leverage: initialValues.leverage,
+                initial_margin: initialValues.initial_margin,
+            };
+        }
         return {
             asset_type: 'stock',
             symbol: '',
@@ -151,6 +173,18 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             tags: [],
         };
     });
+
+    // Reset when initialValues changes (and not editing)
+    useEffect(() => {
+        if (!editTransaction && initialValues) {
+            setFormData(prev => ({
+                ...prev,
+                ...initialValues,
+                timestamp: initialValues.timestamp || prev.timestamp,
+                account_id: initialValues.account_id || prev.account_id
+            }));
+        }
+    }, [initialValues, editTransaction]);
 
     // Populate form when editing existing transaction (updates only)
     useEffect(() => {
@@ -289,6 +323,23 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             return;
         }
 
+        // Dividend Mode: Filter from Portfolio Assets
+        if (formData.action === 'dividend' && portfolioAssets) {
+            const matches = portfolioAssets
+                .filter(a =>
+                    a.asset_type === formData.asset_type &&
+                    a.symbol.toLowerCase().includes(query.toLowerCase())
+                )
+                .map(a => ({
+                    symbol: a.symbol,
+                    name: a.symbol, // PortfolioAsset doesn't have full name, use symbol
+                    market: a.market || '',
+                }));
+            setSymbolSuggestions(matches);
+            setShowSuggestions(matches.length > 0);
+            return;
+        }
+
         setIsLoadingSuggestions(true);
         try {
             let endpoint = '/api/symbols/thai-stocks';
@@ -369,6 +420,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
         return [
             { value: 'buy', label: t('ซื้อ', 'Buy') },
             { value: 'sell', label: t('ขาย', 'Sell') },
+            { value: 'dividend', label: t('รับปันผล', 'Receive Dividend') },
         ];
     };
 
@@ -397,7 +449,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             if (!formData.symbol.trim()) {
                 throw new Error(t('กรุณาระบุสัญลักษณ์', 'Please enter a symbol'));
             }
-            if (formData.quantity <= 0) {
+            if (formData.action !== 'dividend' && formData.quantity <= 0) {
                 throw new Error(t('จำนวนต้องมากกว่า 0', 'Quantity must be greater than 0'));
             }
             if (formData.price <= 0) {
@@ -778,11 +830,13 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                             ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/25'
                                             : (option.value === 'close_long')
                                                 ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25'
-                                                : 'bg-purple-500 text-white shadow-lg shadow-purple-500/25'
+                                                : (option.value === 'dividend')
+                                                    ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25'
+                                                    : 'bg-purple-500 text-white shadow-lg shadow-purple-500/25'
                                     : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
                                     }`}
                             >
-                                {option.value === 'buy' ? '🛒 ' : option.value === 'sell' ? '💰 ' : option.value === 'long' ? '📈 ' : option.value === 'short' ? '📉 ' : option.value === 'close_long' ? '✅ ' : '🔄 '}
+                                {option.value === 'buy' ? '🛒 ' : option.value === 'sell' ? '💰 ' : option.value === 'long' ? '📈 ' : option.value === 'short' ? '📉 ' : option.value === 'close_long' ? '✅ ' : option.value === 'dividend' ? '🎁 ' : '🔄 '}
                                 {option.label}
                             </button>
                         ))}
@@ -792,95 +846,97 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
 
 
                 {/* Quantity */}
-                {/* Quantity / Amount Input */}
-                <div>
-                    <div className="flex justify-between items-center mb-2">
-                        <label className="block text-sm font-medium text-gray-400">
-                            {inputMode === 'quantity' ? t('จำนวน', 'Quantity') : t('มูลค่ารวม (USDT)', 'Total Value (USDT)')}
-                        </label>
-                        {(formData.asset_type === 'crypto' || formData.asset_type === 'stock') && (
-                            <div className="flex bg-gray-700/50 rounded-lg p-0.5 border border-gray-600/50">
-                                <button
-                                    type="button"
-                                    onClick={() => setInputMode('quantity')}
-                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'quantity' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                                >
-                                    Units
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setInputMode('total')}
-                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'total' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                                >
-                                    Total
-                                </button>
+                {/* Quantity / Amount Input - Hide for Dividend */}
+                {formData.action !== 'dividend' && (
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="block text-sm font-medium text-gray-400">
+                                {inputMode === 'quantity' ? t('จำนวน', 'Quantity') : t('มูลค่ารวม (USDT)', 'Total Value (USDT)')}
+                            </label>
+                            {(formData.asset_type === 'crypto' || formData.asset_type === 'stock') && (
+                                <div className="flex bg-gray-700/50 rounded-lg p-0.5 border border-gray-600/50">
+                                    <button
+                                        type="button"
+                                        onClick={() => setInputMode('quantity')}
+                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'quantity' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                    >
+                                        Units
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setInputMode('total')}
+                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'total' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                    >
+                                        Total
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {inputMode === 'quantity' ? (
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                value={quantityStr}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                        setQuantityStr(val);
+                                        const num = parseFloat(val);
+                                        if (!isNaN(num)) {
+                                            setFormData(prev => ({ ...prev, quantity: num }));
+                                            // Update order amount preview if price exists
+                                            if (formData.price > 0) {
+                                                setOrderAmountStr((num * formData.price).toFixed(2));
+                                            }
+                                        } else if (val === '') {
+                                            setFormData(prev => ({ ...prev, quantity: 0 }));
+                                        }
+                                    }
+                                }}
+                                placeholder="0.00000001"
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                            />
+                        ) : (
+                            <div>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={orderAmountStr}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                                setOrderAmountStr(val);
+                                                const amount = parseFloat(val);
+                                                if (!isNaN(amount) && formData.price > 0) {
+                                                    const qty = amount / formData.price;
+                                                    setQuantityStr(qty.toFixed(8));
+                                                    setFormData(prev => ({ ...prev, quantity: qty }));
+                                                }
+                                            }
+                                        }}
+                                        placeholder="1000.00"
+                                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                                    />
+                                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                                        <span className="text-gray-400 text-sm">USDT</span>
+                                    </div>
+                                </div>
+                                <div className="mt-1 text-xs text-gray-500 text-right">
+                                    ≈ {quantityStr || '0'} Units
+                                </div>
                             </div>
                         )}
                     </div>
-
-                    {inputMode === 'quantity' ? (
-                        <input
-                            type="text"
-                            inputMode="decimal"
-                            value={quantityStr}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                                    setQuantityStr(val);
-                                    const num = parseFloat(val);
-                                    if (!isNaN(num)) {
-                                        setFormData(prev => ({ ...prev, quantity: num }));
-                                        // Update order amount preview if price exists
-                                        if (formData.price > 0) {
-                                            setOrderAmountStr((num * formData.price).toFixed(2));
-                                        }
-                                    } else if (val === '') {
-                                        setFormData(prev => ({ ...prev, quantity: 0 }));
-                                    }
-                                }
-                            }}
-                            placeholder="0.00000001"
-                            className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
-                        />
-                    ) : (
-                        <div>
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={orderAmountStr}
-                                    onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                                            setOrderAmountStr(val);
-                                            const amount = parseFloat(val);
-                                            if (!isNaN(amount) && formData.price > 0) {
-                                                const qty = amount / formData.price;
-                                                setQuantityStr(qty.toFixed(8));
-                                                setFormData(prev => ({ ...prev, quantity: qty }));
-                                            }
-                                        }
-                                    }}
-                                    placeholder="1000.00"
-                                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
-                                />
-                                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                                    <span className="text-gray-400 text-sm">USDT</span>
-                                </div>
-                            </div>
-                            <div className="mt-1 text-xs text-gray-500 text-right">
-                                ≈ {quantityStr || '0'} Units
-                            </div>
-                        </div>
-                    )}
-                </div>
+                )}
 
                 {/* Price */}
                 <div>
                     <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                             <label className="text-sm font-medium text-gray-400">
-                                {t('ราคา', 'Price')}
+                                {formData.action === 'dividend' ? t('จำนวนเงินปันผล', 'Dividend Amount') : t('ราคา', 'Price')}
                             </label>
                             <select
                                 value={formData.currency || 'THB'}
@@ -1083,7 +1139,9 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     disabled={isSubmitting}
                     className={`w-full py-3 rounded-lg font-semibold text-white transition-all ${(formData.action === 'buy' || formData.action === 'long')
                         ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 shadow-lg shadow-emerald-500/25'
-                        : 'bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 shadow-lg shadow-rose-500/25'
+                        : (formData.action === 'dividend')
+                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 shadow-lg shadow-amber-500/25'
+                            : 'bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 shadow-lg shadow-rose-500/25'
                         } ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                     {isSubmitting ? (
@@ -1105,6 +1163,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                 case 'short': return t('บันทึก Open Short', 'Save Open Short');
                                 case 'close_long': return t('บันทึก Close Long', 'Save Close Long');
                                 case 'close_short': return t('บันทึก Close Short', 'Save Close Short');
+                                case 'dividend': return t('บันทึกรับปันผล', 'Save Dividend');
                                 default: return t('บันทึก', 'Save');
                             }
                         })()

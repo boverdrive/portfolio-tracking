@@ -5,7 +5,9 @@ use axum::{
 };
 use serde::Deserialize;
 use crate::error::AppError;
-use crate::models::{Transaction, CreateTransactionRequest, UpdateTransactionRequest, AssetType};
+use crate::models::{
+    Transaction, CreateTransactionRequest, UpdateTransactionRequest, AssetType, TradeAction
+};
 use crate::AppState;
 
 /// Extract user_id from Authorization header JWT
@@ -52,7 +54,7 @@ pub async fn create_transaction(
     let user_id = extract_user_id(&state, &headers)?;
     
     // Validate quantity and price
-    if req.quantity <= 0.0 {
+    if req.quantity <= 0.0 && req.action != TradeAction::Dividend {
         return Err(AppError::BadRequest("Quantity must be positive".to_string()));
     }
     if req.price <= 0.0 {
@@ -100,8 +102,15 @@ pub async fn update_transaction(
     
     // Validate if values provided
     if let Some(quantity) = req.quantity {
-        if quantity <= 0.0 {
-            return Err(AppError::BadRequest("Quantity must be positive".to_string()));
+        // We only check quantity > 0 if we know the action, but here we only have UpdateRequest.
+        // If action is NOT being updated, we check against existing.
+        // If action IS being updated, we check against new action.
+        // For simplicity, we check if quantity <= 0 AND (action is not Dividend).
+        // Fetch existing first to check action if not provided.
+        let action = req.action.clone().unwrap_or(existing.action.clone());
+        
+        if quantity <= 0.0 && action != TradeAction::Dividend {
+             return Err(AppError::BadRequest("Quantity must be positive".to_string()));
         }
     }
     if let Some(price) = req.price {
@@ -184,7 +193,7 @@ pub async fn create_transactions_bulk(
 
     for (index, mut req) in reqs.into_iter().enumerate() {
         // Basic validation
-        if req.quantity <= 0.0 {
+        if req.quantity <= 0.0 && req.action != TradeAction::Dividend {
             errors.push(format!("Row {}: Quantity must be positive", index + 1));
             continue;
         }

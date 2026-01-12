@@ -34,7 +34,7 @@ export interface AuthProvidersResponse {
 // Asset types
 export type AssetType = 'stock' | 'tfex' | 'crypto' | 'foreign_stock' | 'gold' | 'commodity';
 
-export type TradeAction = 'buy' | 'sell' | 'long' | 'short' | 'close_long' | 'close_short';
+export type TradeAction = 'buy' | 'sell' | 'long' | 'short' | 'close_long' | 'close_short' | 'dividend';
 
 // Market/Exchange types
 export type Market =
@@ -127,6 +127,7 @@ export interface PortfolioAsset {
   realized_pnl: number;         // Realized P&L from closed portions
   leverage?: number;
   position_type?: string;     // "spot", "long", "short"
+  realized_dividend?: number;
 }
 
 export interface PortfolioSummary {
@@ -136,6 +137,7 @@ export interface PortfolioSummary {
   total_unrealized_pnl_percent: number;
   total_realized_pnl: number;
   realized_pnl_breakdown?: Record<string, number>;
+  total_dividend?: number;
   assets_count: number;
 }
 

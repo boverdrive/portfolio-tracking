@@ -408,6 +408,25 @@ export default function AccountManager({ onAccountSelect, selectedAccountId, tra
             });
         });
 
+        // ========== DIVIDENDS ==========
+        // Add realized dividends to account value (Cash)
+        accountTransactions.filter(tx => tx.action === 'dividend').forEach(tx => {
+            let dividendAmount = tx.price; // Dividend Amount is in price field
+            let currency = tx.currency || 'THB';
+
+            // Fallback: treat USDT as USD if not available in rates
+            if (currency === 'USDT' && !exchangeRates['USDT']) {
+                currency = 'USD';
+            }
+
+            // Convert to THB (Base Currency for aggregation)
+            if (currency !== 'THB' && exchangeRates[currency]) {
+                dividendAmount = dividendAmount / exchangeRates[currency];
+            }
+
+            totalValue += dividendAmount;
+        });
+
         return totalValue;
     };
 
