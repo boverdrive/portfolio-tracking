@@ -22,6 +22,12 @@ pub struct RateLimitConfig {
     #[serde(default)]
     pub minute_reset_at: Option<String>,
     #[serde(default)]
+    pub requests_per_hour: Option<i32>,
+    #[serde(default)]
+    pub current_hour_count: i32,
+    #[serde(default)]
+    pub hour_reset_at: Option<String>,
+    #[serde(default)]
     pub day_reset_at: Option<String>,
     #[serde(default)]
     pub last_request_at: Option<String>,
@@ -93,12 +99,8 @@ impl RateLimiter {
             }
         }
         
-        // Seed default rate limits if empty
-        let cache = self.cache.read().await;
-        if cache.is_empty() {
-            drop(cache);
-            self.seed_defaults().await?;
-        }
+        // Always check and seed defaults (upsert missing)
+        self.seed_defaults().await?;
         
         Ok(())
     }
@@ -106,29 +108,45 @@ impl RateLimiter {
     /// Seed default rate limits
     async fn seed_defaults(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let defaults = vec![
-            ("coingecko", 10, Some(10000)),  // CoinGecko Free tier: very conservative
-            ("bitkub", 100, None),
-            ("binance", 120, None),
-            ("okx", 60, None),
-            ("kucoin", 100, None),           // KuCoin: ~100 req/min for public API
-            ("htx", 100, None),               // HTX (Huobi): ~100 req/min
-            ("yahoo_finance", 60, Some(2000)),
+            ("coingecko", 10, Some(10000), None),  // CoinGecko Free tier: very conservative
+            ("bitkub", 100, None, None),
+            ("binance", 120, None, None),
+            ("okx", 60, None, None),
+            ("kucoin", 100, None, None),           // KuCoin: ~100 req/min for public API
+            ("htx", 100, None, None),               // HTX (Huobi): ~100 req/min
+            ("yahoo_finance", 60, Some(2000), None),
+            ("thaigold", 60, None, Some(10)),       // Thai Gold: 10 req/hour
         ];
         
         let token = self.pb_client.get_token().await;
         
-        for (api_name, rpm, rpd) in defaults {
+        // Read cache to see what's missing
+        let cache_read = self.cache.read().await;
+        let existing_keys: Vec<String> = cache_read.keys().cloned().collect();
+        drop(cache_read);
+
+        for (api_name, rpm, rpd, rph) in defaults {
+            if existing_keys.contains(&api_name.to_string()) {
+                continue;
+            }
+
+            tracing::info!("🌱 Seeding missing rate limit for {}", api_name);
+
             let now = Utc::now();
             let minute_reset = now + Duration::minutes(1);
+            let hour_reset = now + Duration::hours(1);
             let day_reset = now + Duration::days(1);
             
             let config = serde_json::json!({
                 "api_name": api_name,
                 "requests_per_minute": rpm,
+                "requests_per_hour": rph,
                 "requests_per_day": rpd,
                 "current_minute_count": 0,
+                "current_hour_count": 0,
                 "current_day_count": 0,
                 "minute_reset_at": minute_reset.to_rfc3339(),
+                "hour_reset_at": hour_reset.to_rfc3339(),
                 "day_reset_at": day_reset.to_rfc3339(),
                 "is_blocked": false
             });
@@ -156,8 +174,11 @@ impl RateLimiter {
                         requests_per_minute: rpm,
                         requests_per_day: rpd,
                         current_minute_count: 0,
+                        current_hour_count: 0,
                         current_day_count: 0,
+                        requests_per_hour: rph,
                         minute_reset_at: Some(minute_reset.to_rfc3339()),
+                        hour_reset_at: Some(hour_reset.to_rfc3339()),
                         day_reset_at: Some(day_reset.to_rfc3339()),
                         last_request_at: None,
                         is_blocked: false,
@@ -212,6 +233,18 @@ impl RateLimiter {
                 }
             }
             
+
+            
+            // Reset hour counter if needed
+            if let Some(reset_at) = &config.hour_reset_at {
+                if let Ok(reset) = DateTime::parse_from_rfc3339(reset_at) {
+                    if now >= reset.with_timezone(&Utc) {
+                        config.current_hour_count = 0;
+                        config.hour_reset_at = Some((now + Duration::hours(1)).to_rfc3339());
+                    }
+                }
+            }
+            
             // Reset day counter if needed
             if let Some(reset_at) = &config.day_reset_at {
                 if let Ok(reset) = DateTime::parse_from_rfc3339(reset_at) {
@@ -227,6 +260,15 @@ impl RateLimiter {
                 tracing::warn!("⚠️ {} rate limit reached: {}/{} per minute", 
                     api_name, config.current_minute_count, config.requests_per_minute);
                 return false;
+            }
+            
+            // Check hour limit
+            if let Some(hour_limit) = config.requests_per_hour {
+                if hour_limit > 0 && config.current_hour_count >= hour_limit {
+                    tracing::warn!("⚠️ {} hourly limit reached: {}/{}", 
+                        api_name, config.current_hour_count, hour_limit);
+                    return false;
+                }
             }
             
             
@@ -254,6 +296,7 @@ impl RateLimiter {
         if let Some(config) = cache.get_mut(api_name) {
             let now = Utc::now();
             config.current_minute_count += 1;
+            config.current_hour_count += 1;
             config.current_day_count += 1;
             config.last_request_at = Some(now.to_rfc3339());
             
@@ -263,9 +306,11 @@ impl RateLimiter {
                 let token = self.pb_client.get_token().await;
                 let update = serde_json::json!({
                     "current_minute_count": config.current_minute_count,
+                    "current_hour_count": config.current_hour_count,
                     "current_day_count": config.current_day_count,
                     "last_request_at": config.last_request_at,
                     "minute_reset_at": config.minute_reset_at,
+                    "hour_reset_at": config.hour_reset_at,
                     "day_reset_at": config.day_reset_at
                 });
                 

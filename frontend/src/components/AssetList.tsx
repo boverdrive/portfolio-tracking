@@ -198,6 +198,7 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
                             {/* Quantity */}
                             <div className="flex-1 text-right font-mono text-gray-300">
                                 {formatNumber(asset.quantity, asset.asset_type === 'crypto' ? 8 : 2)}
+                                {asset.unit && <span className="text-gray-500 text-xs ml-1">{asset.unit}</span>}
                             </div>
 
                             {/* Average Cost + Fees */}

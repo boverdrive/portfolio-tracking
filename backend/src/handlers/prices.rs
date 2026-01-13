@@ -81,19 +81,24 @@ pub async fn get_price(
                 if let Some(items) = data.get("items").and_then(|i| i.as_array()) {
                     if let Some(first) = items.first() {
                         if let Some(price) = first.get("price").and_then(|p| p.as_f64()) {
-                            let currency = first.get("currency")
-                                .and_then(|c| c.as_str())
-                                .unwrap_or("THB")
-                                .to_string();
-                            
-                            tracing::debug!("📊 Using manual price for {}: {} {}", symbol, price, currency);
-                            
-                            return Ok(Json(PriceEntry {
-                                symbol: symbol.clone(),
-                                price,
-                                currency,
-                                updated_at: chrono::Utc::now(),
-                            }));
+                            // Sanity check for Thai Gold: Ignore price if > 1M (likely unit conversion error stored previously)
+                            if symbol.to_uppercase() == "GOLD96.5" && price > 1_000_000.0 {
+                                tracing::warn!("⚠️ Found invalid/stale price for {}: {}. Ignoring fallback.", symbol, price);
+                            } else {
+                                let currency = first.get("currency")
+                                    .and_then(|c| c.as_str())
+                                    .unwrap_or("THB")
+                                    .to_string();
+                                
+                                tracing::debug!("📊 Using manual price for {}: {} {}", symbol, price, currency);
+                                
+                                return Ok(Json(PriceEntry {
+                                    symbol: symbol.clone(),
+                                    price,
+                                    currency,
+                                    updated_at: chrono::Utc::now(),
+                                }));
+                            }
                         }
                     }
                 }
@@ -260,6 +265,7 @@ fn parse_market(s: &str) -> Result<Market, AppError> {
         "kucoin" => Ok(Market::Kucoin),
         "comex" => Ok(Market::Comex),
         "lbma" => Ok(Market::Lbma),
+        "local" => Ok(Market::Local),
         _ => Err(AppError::BadRequest(format!("Invalid market: {}", s))),
     }
 }

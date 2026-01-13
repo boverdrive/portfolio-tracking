@@ -315,6 +315,20 @@
                 "required": false,
                 "system": false,
                 "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_unit_014",
+                "max": 0,
+                "min": 0,
+                "name": "unit",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
             }
         ],
         "indexes": [],

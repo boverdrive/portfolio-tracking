@@ -99,6 +99,7 @@ const defaultMarkets: MarketConfig[] = [
     { id: 'comex', name: 'COMEX', nameEn: 'COMEX', assetType: 'gold', currency: 'USD', enabled: true, priceSource: 'https://www.goldapi.io' },
     { id: 'lbma', name: 'LBMA', nameEn: 'LBMA', assetType: 'gold', currency: 'USD', enabled: true, priceSource: 'https://www.goldapi.io' },
     { id: 'goldtrader', name: 'ทองคำไทย', nameEn: 'Thai Gold', assetType: 'gold', currency: 'THB', enabled: true, priceSource: 'https://www.goldtraders.or.th' },
+    { id: 'local', name: 'ทั่วไป (ในประเทศ)', nameEn: 'Local (Domestic)', assetType: 'gold', currency: 'THB', enabled: true, priceSource: '' },
 ];
 
 const defaultCurrencies: CurrencyConfig[] = [

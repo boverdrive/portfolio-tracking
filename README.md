@@ -65,14 +65,24 @@ npm run dev
 
 Frontend จะรันที่ http://localhost:3000
 
-### 3. Start PocketBase (Optional)
+### 4. Run with Docker (Recommended)
 
 ```bash
-# Download PocketBase จาก https://pocketbase.io/docs/
+docker compose up -d --build
+```
+
+- **Frontend**: http://localhost:3000
+- **Backend**: http://localhost:3001
+- **PocketBase Admin**: http://localhost:8090/_/ (Login with admin credentials in `backend/src/config.rs` or setup new)
+
+### 3. Start PocketBase (Manual Layout)
+
+```bash
+# Download PocketBase from https://pocketbase.io/docs/
 ./pocketbase serve
 ```
 
-PocketBase จะรันที่ http://localhost:8090
+PocketBase will run at http://localhost:8090
 
 ## 📡 API Endpoints
 

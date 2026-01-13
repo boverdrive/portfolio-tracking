@@ -459,15 +459,16 @@ function MarketSettings() {
                         </h4>
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm text-gray-400 mb-1">ID</label>
+                                <label className="block text-sm text-gray-400 mb-1">ID (Unique)</label>
                                 <input
                                     type="text"
                                     value={formData.id}
-                                    onChange={(e) => setFormData({ ...formData, id: e.target.value })}
+                                    onChange={(e) => setFormData({ ...formData, id: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') })}
                                     disabled={!!editingMarket}
-                                    placeholder="e.g., nyse, hkex"
-                                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white disabled:opacity-50"
+                                    placeholder="e.g. my_market"
+                                    className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white disabled:opacity-50 font-mono"
                                 />
+                                <p className="text-xs text-gray-500 mt-1">{t('ใช้อักษรภาษาอังกฤษพิมพ์เล็กและตัวเลขเท่านั้น', 'Lowercase English letters and numbers only')}</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>

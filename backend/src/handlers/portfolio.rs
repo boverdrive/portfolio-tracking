@@ -67,6 +67,10 @@ pub async fn get_portfolio(
         // Key now includes position_bucket to separate distinct positions (Hedge Mode)
         let key = format!("{}:{}:{}:{}", tx.asset_type, market_key, tx.symbol, position_bucket);
         
+        // Normalize quantity and price to base unit (e.g. Oz for gold)
+        let (tx_quantity, base_unit) = crate::utils::units::normalize_quantity(tx.quantity, tx.unit.as_deref(), &tx.asset_type, &tx.symbol);
+        let tx_price = crate::utils::units::normalize_price(tx.price, tx.unit.as_deref(), &tx.asset_type, &tx.symbol);
+
         let asset = holdings.entry(key.clone()).or_insert_with(|| {
             let currency = tx.currency.clone()
                 .or_else(|| tx.market.as_ref().map(|m| m.default_currency().to_string()))
@@ -77,6 +81,12 @@ pub async fn get_portfolio(
                 tx.market.clone(),
                 currency,
             );
+            
+            // Set unit if not standard share
+            if base_unit != "share" {
+                new_asset.unit = Some(base_unit);
+            }
+
             new_asset.position_type = position_bucket.to_string(); // Set the position type
             
             // Set leverage from first transaction
@@ -94,12 +104,12 @@ pub async fn get_portfolio(
         match tx.action {
             TradeAction::Buy | TradeAction::Long => {
                 // Buy, Long (open buy) - increase long position
-                let new_quantity = asset.quantity + tx.quantity;
+                let new_quantity = asset.quantity + tx_quantity;
                 
                 // Update Weighted Average Cost (PRICE)
                 // We MUST use Price for avg_cost to ensure P/L calculations are correct.
                 let current_notional = asset.quantity.abs() * asset.avg_cost;
-                let new_notional = tx.quantity * tx.price;
+                let new_notional = tx_quantity * tx_price;
                 
                 if new_quantity.abs() > 0.0 {
                     asset.avg_cost = (current_notional + new_notional) / new_quantity.abs();
@@ -115,7 +125,7 @@ pub async fn get_portfolio(
                 let invest_amount = if use_margin && tx.initial_margin.is_some() {
                     tx.initial_margin.unwrap()
                 } else {
-                    tx.quantity * tx.price
+                    tx_quantity * tx_price
                 };
                 
                 // Add new investment + fees to total cost basis
@@ -127,11 +137,11 @@ pub async fn get_portfolio(
             }
             TradeAction::Short => {
                 // Open Short - create/increase negative position
-                let new_quantity = asset.quantity - tx.quantity;  // Goes more negative
+                let new_quantity = asset.quantity - tx_quantity;  // Goes more negative
                 
                 // Update Weighted Average Cost (PRICE)
                 let current_notional = asset.quantity.abs() * asset.avg_cost;
-                let new_notional = tx.quantity * tx.price;
+                let new_notional = tx_quantity * tx_price;
                 
                 if new_quantity.abs() > 0.0 {
                     asset.avg_cost = (current_notional + new_notional) / new_quantity.abs();
@@ -146,7 +156,7 @@ pub async fn get_portfolio(
                 let invest_amount = if use_margin && tx.initial_margin.is_some() {
                     tx.initial_margin.unwrap()
                 } else {
-                    tx.quantity * tx.price
+                    tx_quantity * tx_price
                 };
                 
                 asset.total_cost += invest_amount + tx.fees;
@@ -158,11 +168,11 @@ pub async fn get_portfolio(
                 // Sell, CloseLong - close long position
                 if asset.quantity > 0.0 {
                     // Realized PnL Calculation
-                    let sell_value = tx.quantity * tx.price - tx.fees;
-                    let cost_basis = tx.quantity * asset.avg_cost; // Notional Cost (Entry Price * Qty)
+                    let sell_value = tx_quantity * tx_price - tx.fees;
+                    let cost_basis = tx_quantity * asset.avg_cost; // Notional Cost (Entry Price * Qty)
                     
                     // Reduce quantity
-                    let ratio = tx.quantity / asset.quantity;
+                    let ratio = tx_quantity / asset.quantity;
                     
                     // Reduce Fees proportionally
                     let fee_portion = asset.total_fees * ratio;
@@ -194,11 +204,11 @@ pub async fn get_portfolio(
             TradeAction::CloseShort => {
                 // CloseShort - buy to close short position
                 if asset.quantity < 0.0 {
-                    let buy_cost = tx.quantity * tx.price + tx.fees; // Cost to close
-                    let short_value = tx.quantity * asset.avg_cost;  // Price we sold at * qty
+                    let buy_cost = tx_quantity * tx_price + tx.fees; // Cost to close
+                    let short_value = tx_quantity * asset.avg_cost;  // Price we sold at * qty
                     
                     // Reduce negative quantity (towards 0)
-                    let ratio = tx.quantity / asset.quantity.abs();
+                    let ratio = tx_quantity / asset.quantity.abs();
                     
                     let fee_portion = asset.total_fees * ratio;
                     asset.total_fees -= fee_portion;
@@ -220,7 +230,7 @@ pub async fn get_portfolio(
                     *realized_pnl_breakdown.entry(currency).or_insert(0.0) += pnl;
  
                     asset.realized_pnl += pnl;
-                    asset.quantity += tx.quantity;
+                    asset.quantity += tx_quantity;
                 }
             }
             TradeAction::Dividend => {

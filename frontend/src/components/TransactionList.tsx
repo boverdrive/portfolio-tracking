@@ -174,7 +174,7 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                                         </span>
                                     ) : (
                                         <>
-                                            {tx.quantity.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 8 })} × {formatCurrency(
+                                            {tx.quantity.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 8 })} {tx.unit ? tx.unit : ''} × {formatCurrency(
                                                 convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price,
                                                 displayCurrency
                                             )}

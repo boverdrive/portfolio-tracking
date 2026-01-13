@@ -71,6 +71,7 @@ export interface Transaction {
   tags?: string[];
   leverage?: number;  // Leverage multiplier for futures (e.g., 10, 20)
   initial_margin?: number; // Actual money used for futures
+  unit?: string;
   created_at: string;
   updated_at: string;
 }
@@ -91,6 +92,7 @@ export interface CreateTransactionRequest {
   tags?: string[];
   leverage?: number;
   initial_margin?: number;
+  unit?: string;
 }
 
 export interface UpdateTransactionRequest {
@@ -108,6 +110,7 @@ export interface UpdateTransactionRequest {
   account_id?: string;
   tags?: string[];
   initial_margin?: number;
+  unit?: string;
 }
 
 // Portfolio models
@@ -116,6 +119,7 @@ export interface PortfolioAsset {
   asset_type: AssetType;
   market?: Market;
   currency: string;
+  unit?: string;
   quantity: number;
   avg_cost: number;        // Average purchase price (without fees)
   total_fees: number;      // Total fees paid

@@ -9,6 +9,8 @@ pub struct PortfolioAsset {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub market: Option<Market>,
     pub currency: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>, 
     pub quantity: f64,
     pub avg_cost: f64,        // Average purchase price (without fees)
     pub total_fees: f64,      // Total fees paid
@@ -36,6 +38,7 @@ impl PortfolioAsset {
             asset_type,
             market,
             currency,
+            unit: None,
             quantity: 0.0,
             avg_cost: 0.0,
             total_fees: 0.0,

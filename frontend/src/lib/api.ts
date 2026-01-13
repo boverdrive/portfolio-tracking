@@ -12,7 +12,9 @@ import {
     UpdateAccountRequest,
 } from '@/types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE_URL = typeof window === 'undefined'
+    ? (process.env.INTERNAL_API_URL || 'http://localhost:3001')
+    : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001');
 const TOKEN_KEY = 'auth_token';
 
 // Get auth token from localStorage
@@ -222,7 +224,7 @@ export function getEffectiveCurrency(tx: Transaction, defaultCurrency: string = 
         // US Markets / Global Markets typically trade in USD
         if (['nyse', 'nasdaq', 'amex', 'coinbase', 'comex', 'lbma', 'forex'].includes(m)) return 'USD';
         // Thai Markets typically trade in THB - Force return THB here and stop checking
-        if (['set', 'mai', 'tfex', 'bitkub'].includes(m)) return 'THB';
+        if (['set', 'mai', 'tfex', 'bitkub', 'local'].includes(m)) return 'THB';
     }
 
     // Priority 2: Asset Type Intelligence (New!)

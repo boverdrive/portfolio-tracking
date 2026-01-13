@@ -3,6 +3,7 @@ mod error;
 mod handlers;
 mod models;
 mod services;
+mod utils;
 
 use axum::{
     routing::{get, post, put, delete, patch},

@@ -135,6 +135,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 tags: editTransaction.tags || [],
                 leverage: editTransaction.leverage,
                 initial_margin: editTransaction.initial_margin,
+                unit: editTransaction.unit,
             };
         }
 
@@ -155,6 +156,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 tags: initialValues.tags || [],
                 leverage: initialValues.leverage,
                 initial_margin: initialValues.initial_margin,
+                unit: initialValues.unit,
             };
         }
         return {
@@ -205,6 +207,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 tags: editTransaction.tags || [],
                 leverage: editTransaction.leverage,
                 initial_margin: editTransaction.initial_margin,
+                unit: editTransaction.unit,
             });
             setQuantityStr(String(editTransaction.quantity));
             setPriceStr(String(editTransaction.price));
@@ -297,6 +300,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             action: defaultAction,
             market: defaultMarket,
             currency: getCurrencyForAssetType(type, defaultMarket),
+            unit: type === 'gold' ? 'baht' : (type === 'commodity' ? 'oz' : undefined),
         });
     };
 
@@ -316,8 +320,16 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             return;
         }
 
+        // Auto-set default unit for Gold/Commodity
+        if (formData.asset_type === 'gold' && !formData.unit) {
+            setFormData(prev => ({ ...prev, unit: 'baht' }));
+        }
+        if (formData.asset_type === 'commodity' && !formData.unit) {
+            setFormData(prev => ({ ...prev, unit: 'oz' }));
+        }
+
         // Only these asset types have autocomplete
-        if (formData.asset_type !== 'stock' && formData.asset_type !== 'tfex' && formData.asset_type !== 'crypto' && formData.asset_type !== 'foreign_stock') {
+        if (formData.asset_type !== 'stock' && formData.asset_type !== 'tfex' && formData.asset_type !== 'crypto' && formData.asset_type !== 'foreign_stock' && formData.asset_type !== 'gold' && formData.asset_type !== 'commodity') {
             setSymbolSuggestions([]);
             setShowSuggestions(false);
             return;
@@ -335,6 +347,40 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     name: a.symbol, // PortfolioAsset doesn't have full name, use symbol
                     market: a.market || '',
                 }));
+            setSymbolSuggestions(matches);
+            setShowSuggestions(matches.length > 0);
+            return;
+        }
+
+        // Static suggestions for Gold/Commodity
+        if (formData.asset_type === 'gold') {
+            const goldSymbols = [
+                { symbol: 'GOLD96.5', name: 'Thai Gold 96.5%', market: 'local' },
+                { symbol: 'GOLD99.99', name: 'Thai Gold 99.99%', market: 'local' },
+                { symbol: 'XAU', name: 'Gold Spot (USD)', market: 'global' },
+                { symbol: 'XAUTHB', name: 'Gold Spot (THB)', market: 'global' },
+            ];
+            const matches = goldSymbols.filter(s =>
+                s.symbol.toLowerCase().includes(query.toLowerCase()) ||
+                s.name.toLowerCase().includes(query.toLowerCase())
+            );
+            setSymbolSuggestions(matches);
+            setShowSuggestions(matches.length > 0);
+            return;
+        }
+
+        if (formData.asset_type === 'commodity') {
+            const commoditySymbols = [
+                { symbol: 'XAG', name: 'Silver Spot', market: 'global' },
+                { symbol: 'GC', name: 'Gold Futures (Comex)', market: 'COMEX' },
+                { symbol: 'SI', name: 'Silver Futures (Comex)', market: 'COMEX' },
+                { symbol: 'CL', name: 'Crude Oil', market: 'NYMEX' },
+                { symbol: 'NG', name: 'Natural Gas', market: 'NYMEX' },
+            ];
+            const matches = commoditySymbols.filter(s =>
+                s.symbol.toLowerCase().includes(query.toLowerCase()) ||
+                s.name.toLowerCase().includes(query.toLowerCase())
+            );
             setSymbolSuggestions(matches);
             setShowSuggestions(matches.length > 0);
             return;
@@ -371,7 +417,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
     // Handle symbol input change with debounce
     const handleSymbolChange = (value: string) => {
         setFormData({ ...formData, symbol: value });
-        if (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock') {
+        if (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') {
             // Debounce API calls
             const timeoutId = setTimeout(() => {
                 fetchSymbolSuggestions(value);
@@ -627,7 +673,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                         value={formData.symbol}
                         onChange={(e) => handleSymbolChange(e.target.value)}
                         onFocus={() => {
-                            if ((formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock') && formData.symbol.length >= 1) {
+                            if ((formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') && formData.symbol.length >= 1) {
                                 fetchSymbolSuggestions(formData.symbol);
                             }
                         }}
@@ -637,7 +683,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     />
 
                     {/* Autocomplete Dropdown */}
-                    {showSuggestions && (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock') && (
+                    {showSuggestions && (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') && (
                         <div
                             ref={suggestionsRef}
                             className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto"
@@ -814,6 +860,8 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     </div>
                 )}
 
+
+
                 {/* Action */}
                 <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">{t('ประเภทรายการ', 'Action')}</label>
@@ -928,6 +976,34 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                 </div>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {/* Unit Selector (Gold/Commodity) - Moved here */}
+                {(formData.asset_type === 'gold' || formData.asset_type === 'commodity') && (
+                    <div className="mb-4 mt-2">
+                        <label className="block text-sm font-medium text-gray-400 mb-2">{t('หน่วย', 'Unit')}</label>
+                        <div className="grid grid-cols-5 gap-2">
+                            {[
+                                { value: 'baht', label: t('บาท', 'Baht') },
+                                { value: 'salung', label: t('สลึง', 'Salung') },
+                                { value: 'oz', label: t('ออนซ์', 'Oz') },
+                                { value: 'gram', label: t('กรัม', 'Gram') },
+                                { value: 'kg', label: t('กิโลกรัม', 'Kg') },
+                            ].map((unit) => (
+                                <button
+                                    key={unit.value}
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, unit: unit.value })}
+                                    className={`px-2 py-2 rounded-lg text-sm font-medium transition-all ${formData.unit === unit.value
+                                        ? 'bg-amber-500 text-white shadow-lg'
+                                        : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                                        }`}
+                                >
+                                    {unit.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 )}
 

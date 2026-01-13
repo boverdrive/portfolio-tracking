@@ -256,6 +256,7 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
                             <div className="text-sm text-gray-400 mb-1">{t('จำนวนที่ถือครอง', 'Quantity')}</div>
                             <div className="text-xl font-mono text-white">
                                 {formatNumber(asset.quantity, asset.asset_type === 'crypto' ? 8 : 2)}
+                                {asset.unit && <span className="text-gray-500 text-sm ml-1.5">{asset.unit}</span>}
                             </div>
                         </div>
                         <div className="bg-gray-800/40 p-4 rounded-xl border border-gray-700/30">

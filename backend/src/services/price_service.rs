@@ -19,6 +19,36 @@ pub struct PriceEntry {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Response from api.chnwt.dev/thai-gold-api/latest
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct ThaiGoldResponse {
+    status: String,
+    response: ThaiGoldResponseData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct ThaiGoldResponseData {
+    date: String,
+    update_time: String,
+    price: ThaiGoldPriceData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct ThaiGoldPriceData {
+    gold: ThaiGoldBuySell,
+    gold_bar: ThaiGoldBuySell,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct ThaiGoldBuySell {
+    buy: String,
+    sell: String,
+}
+
 /// Price service for fetching prices from external APIs with caching
 #[derive(Clone)]
 pub struct PriceService {
@@ -1079,10 +1109,29 @@ impl PriceService {
         })
     }
 
-    /// Fetch gold price (mock - Metals API requires key)
+    /// Fetch gold price (Thai Gold API or Yahoo Finance)
     async fn fetch_gold_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        let symbol_upper = symbol.to_uppercase();
+        
+        // Thai Gold (Baht/Baht-weight)
+        if symbol_upper == "GOLD" || symbol_upper == "GOLD96.5" || symbol_upper == "GOLD99.99" {
+            return self.fetch_thai_gold_price(&symbol_upper).await;
+        }
+        
+        // International Gold (USD/oz)
+        if symbol_upper == "XAU" || symbol_upper == "XAUUSD" || symbol_upper == "GC" || symbol_upper == "GC=F" {
+            // Try Yahoo Finance first
+            match self.fetch_yahoo_gold_price("GC=F", symbol).await {
+                Ok(entry) => return Ok(entry),
+                Err(e) => {
+                    tracing::warn!("Yahoo Finance failed for Gold: {}, falling back to mock", e);
+                }
+            }
+        }
+
+        // Fallback to mock if API fails or for other symbols
         tracing::warn!(
-            "Using mock price for gold {}. Metals API integration pending.", 
+            "Using mock price for gold {}. Real API fetch failed or not supported.", 
             symbol
         );
 
@@ -1115,8 +1164,143 @@ impl PriceService {
         })
     }
 
-    /// Fetch commodity price (mock)
+    /// Fetch Thai Gold price from api.chnwt.dev
+    async fn fetch_thai_gold_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        // No strict rate limit specified, but let's be polite (use general limit)
+        if let Some(ref limiter) = self.rate_limiter {
+             if !limiter.can_request("thaigold").await {
+                  return Err(AppError::ExternalApiError("Rate limit exceeded for Thai Gold API".to_string()));
+             }
+        }
+
+        let url = "https://api.chnwt.dev/thai-gold-api/latest";
+        tracing::info!("Fetching Thai Gold price from: {}", url);
+
+        let start = Instant::now();
+
+        let response = self.client
+            .get(url)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        
+        self.record_api_call("thaigold").await;
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        if !response.status().is_success() {
+             let error_msg = format!("Thai Gold API error: {}", response.status());
+             self.log_api_call_async("thaigold", Some("local"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(url));
+             return Err(AppError::ExternalApiError(error_msg));
+        }
+
+        let data: ThaiGoldResponse = response.json().await?;
+        
+        // Parse price string (remove commas) - e.g. "67,950.00" -> 67950.00
+        let parse_price = |s: &str| -> Result<f64, AppError> {
+            let clean = s.replace(',', "");
+            clean.parse::<f64>().map_err(|_| AppError::ExternalApiError(format!("Invalid price format: {}", s)))
+        };
+
+        // Get 96.5% Bar Sell Price as baseline
+        let price_965 = parse_price(&data.response.price.gold_bar.sell)?;
+        
+        let final_price = if symbol == "GOLD99.99" {
+            // Estimate 99.99% price based on 96.5%
+            price_965 * (99.99 / 96.5)
+        } else {
+            price_965
+        };
+
+        tracing::info!("Thai Gold Price for {}: {} THB", symbol, final_price);
+        
+        self.log_api_call_async("thaigold", Some("local"), symbol, "success", elapsed_ms, Some(final_price), Some("THB"), None, Some(url));
+
+        Ok(PriceEntry {
+            symbol: symbol.to_string(),
+            price: final_price,
+            currency: "THB".to_string(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    /// Fetch Gold/Silver Futures from Yahoo Finance
+    async fn fetch_yahoo_gold_price(&self, yahoo_symbol: &str, original_symbol: &str) -> Result<PriceEntry, AppError> {
+        self.check_rate_limit("yahoo_finance").await?;
+        
+        let url = format!(
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+            yahoo_symbol
+        );
+
+        tracing::info!("Fetching Precious Metals price from Yahoo Finance: {}", url);
+        let start = Instant::now();
+
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await?;
+        
+        self.record_api_call("yahoo_finance").await;
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        if response.status().as_u16() == 429 {
+            self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
+            self.log_api_call_async("yahoo_finance", Some("COMEX"), original_symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
+            return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
+        }
+
+        if !response.status().is_success() {
+             let error_msg = format!("Yahoo Finance error: {}", response.status());
+             self.log_api_call_async("yahoo_finance", Some("COMEX"), original_symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+             return Err(AppError::ExternalApiError(error_msg));
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        let price = data
+            .get("chart")
+            .and_then(|c| c.get("result"))
+            .and_then(|r| r.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|item| item.get("meta"))
+            .and_then(|meta| meta.get("regularMarketPrice"))
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| {
+                let error_msg = format!("Could not parse Yahoo Finance price for {}", original_symbol);
+                self.log_api_call_async("yahoo_finance", Some("COMEX"), original_symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
+                AppError::ExternalApiError(error_msg)
+            })?;
+
+        let currency = "USD"; // Usually USD for these futures
+
+        self.log_api_call_async("yahoo_finance", Some("COMEX"), original_symbol, "success", elapsed_ms, Some(price), Some(currency), None, Some(&url));
+
+        Ok(PriceEntry {
+            symbol: original_symbol.to_string(),
+            price,
+            currency: currency.to_string(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    /// Fetch commodity price
     async fn fetch_commodity_price(&self, symbol: &str) -> Result<PriceEntry, AppError> {
+        let symbol_upper = symbol.to_uppercase();
+        
+        // Try Yahoo Finance for Precious Metals
+        if symbol_upper == "XAG" || symbol_upper == "SI" || symbol_upper == "SI=F" {
+             if let Ok(entry) = self.fetch_yahoo_gold_price("SI=F", symbol).await {
+                 return Ok(entry);
+             }
+        }
+        if symbol_upper == "GC" || symbol_upper == "GC=F" {
+             if let Ok(entry) = self.fetch_yahoo_gold_price("GC=F", symbol).await {
+                 return Ok(entry);
+             }
+        }
+
         tracing::warn!(
             "Using mock price for commodity {}.", 
             symbol
@@ -1182,5 +1366,10 @@ impl PriceService {
         let mut cache = self.cache.write().await;
         cache.clear();
         tracing::info!("Price cache cleared");
+        
+        // Also try to clear potentially stale data from PocketBase (specifically for GOLD96.5 which had unit issues)
+        if let Some(client) = &self.pb_client {
+            let _ = client.delete_asset_price("GOLD96.5").await;
+        }
     }
 }

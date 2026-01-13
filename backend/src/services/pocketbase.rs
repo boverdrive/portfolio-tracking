@@ -807,8 +807,63 @@ impl PocketBaseClient {
             Ok(())
         } else {
             let status = response.status();
-            Err(AppError::Internal(format!("Failed to delete provider: {}", status)))
+            let body = response.text().await.unwrap_or_default();
+            Err(AppError::Internal(format!("Failed to delete provider: {} - {}", status, body)))
         }
+    }
+
+    // ==================== Asset Price Operations ====================
+
+    /// Delete asset price by symbol
+    pub async fn delete_asset_price(&self, symbol: &str) -> Result<(), AppError> {
+        let token = self.get_token().await;
+        
+        // 1. Find the record ID
+        let find_url = format!(
+            "{}/api/collections/asset_prices/records?filter=(symbol='{}')",
+            self.pocketbase_url,
+            symbol
+        );
+        
+        let request = self.client.get(&find_url);
+        let request = if !token.is_empty() {
+            request.header("Authorization", &token)
+        } else {
+            request
+        };
+        
+        let response = request.send().await
+            .map_err(|e| AppError::Internal(format!("Failed to find asset price: {}", e)))?;
+            
+        if !response.status().is_success() {
+             return Ok(()); // Ignore if not found or error
+        }
+        
+        #[derive(Deserialize)]
+        struct PriceRecord { id: String }
+        
+        let data: PBListResponse<PriceRecord> = response.json().await
+             .map_err(|e| AppError::Internal(format!("Failed to parse asset price search: {}", e)))?;
+             
+        if data.items.is_empty() {
+            return Ok(());
+        }
+        
+        // 2. Delete all matching records
+        for item in data.items {
+            let delete_url = format!("{}/api/collections/asset_prices/records/{}", self.pocketbase_url, item.id);
+            let req = self.client.delete(&delete_url);
+            let req = if !token.is_empty() {
+                req.header("Authorization", &token)
+            } else {
+                req
+            };
+            
+            let _ = req.send().await;
+            tracing::info!("🗑️ Deleted stale asset_price record for {}", symbol);
+        }
+        
+        Ok(())
     }
 
     /// Reorder providers for a market (update priorities)

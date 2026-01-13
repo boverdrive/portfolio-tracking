@@ -64,6 +64,7 @@ pub enum Market {
     Lbma,            // London Bullion Market
     
     // Other
+    Local,
     Other,
 }
 
@@ -91,6 +92,7 @@ impl std::fmt::Display for Market {
             Market::Kucoin => write!(f, "KUCOIN"),
             Market::Comex => write!(f, "COMEX"),
             Market::Lbma => write!(f, "LBMA"),
+            Market::Local => write!(f, "LOCAL"),
             Market::Other => write!(f, "OTHER"),
         }
     }
@@ -100,7 +102,7 @@ impl Market {
     /// Get the default currency for this market
     pub fn default_currency(&self) -> &str {
         match self {
-            Market::Set | Market::Mai | Market::Tfex | Market::Bitkub => "THB",
+            Market::Set | Market::Mai | Market::Tfex | Market::Bitkub | Market::Local => "THB",
             Market::Nyse | Market::Nasdaq | Market::Amex | Market::Coinbase | Market::Comex => "USD",
             Market::Lse => "GBP",
             Market::Euronext | Market::Xetra => "EUR",
@@ -158,6 +160,8 @@ pub struct Transaction {
     pub leverage: Option<f64>,         // Leverage multiplier for futures (e.g., 10x, 20x)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_margin: Option<f64>,   // Actual money used for futures
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,          // Unit of measurement (e.g. "baht", "oz", "gram")
     #[serde(default, skip_serializing)]
     pub created_at: DateTime<Utc>,
     #[serde(default, skip_serializing)]
@@ -184,6 +188,7 @@ pub struct CreateTransactionRequest {
     pub tags: Vec<String>,
     pub leverage: Option<f64>,
     pub initial_margin: Option<f64>,
+    pub unit: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -203,6 +208,7 @@ pub struct UpdateTransactionRequest {
     pub tags: Option<Vec<String>>,
     pub leverage: Option<f64>,
     pub initial_margin: Option<f64>,
+    pub unit: Option<String>,
 }
 
 impl Transaction {
@@ -234,6 +240,7 @@ impl Transaction {
             tags: req.tags,
             leverage: req.leverage,
             initial_margin: req.initial_margin,
+            unit: req.unit,
             created_at: now,
             updated_at: now,
         }

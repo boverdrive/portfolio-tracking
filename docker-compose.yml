@@ -1,0 +1,55 @@
+services:
+  # PocketBase Service
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: portfolio-pocketbase
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pocketbase/pb_data:/pb/pb_data
+      - ./pocketbase/pb_public:/pb/pb_public
+    command:
+      - --http=0.0.0.0:8090
+      - --dir=/pb/pb_data
+      - --publicDir=/pb/pb_public
+
+  # Backend Service (Rust)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: portfolio-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=3001
+      - POCKETBASE_URL=http://pocketbase:8090
+      - FRONTEND_URL=http://localhost:3000
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000
+      # Credentials to connect to PocketBase (Must match what you setup in PocketBase Admin UI)
+      - POCKETBASE_ADMIN_EMAIL=${POCKETBASE_ADMIN_EMAIL}
+      - POCKETBASE_ADMIN_PASSWORD=${POCKETBASE_ADMIN_PASSWORD}
+      # Use internal docker networking for backend-to-frontend calls if needed,
+      # but usually frontend calls backend.
+    depends_on:
+      - pocketbase
+
+  # Frontend Service (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: portfolio-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Browser-side URL (Public)
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+      # Server-side URL (Internal Docker Network)
+      - INTERNAL_API_URL=http://backend:3001
+    depends_on:
+      - backend
