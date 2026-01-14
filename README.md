@@ -1,4 +1,4 @@
-# Portfolio Tracker
+# PT - Portfolio Tracking
 
 แอปพลิเคชันสำหรับติดตามการลงทุนในหุ้น, TFEX และ Cryptocurrency พร้อมแสดงกำไร/ขาดทุน real-time
 
