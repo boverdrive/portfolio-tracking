@@ -49,7 +49,7 @@ export default function Footer() {
         <footer className="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur-sm border-t border-gray-800 py-2 px-4 z-40">
             <div className="w-full max-w-[1920px] mx-auto flex items-center justify-between text-xs">
                 <div className="text-gray-500">
-                    Portfolio Tracker v1.0
+                    PT - Portfolio Tracking v1.0
                 </div>
 
                 <div className="flex items-center gap-4">

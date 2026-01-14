@@ -80,6 +80,22 @@ docker compose up -d --build
 ```bash
 # Download PocketBase from https://pocketbase.io/docs/
 ./pocketbase serve
+
+# Import Schema
+1. Go to http://localhost:8090/_/ > Settings > Import collections
+2. Select `backend/pb_schema_v035.json` and choose **Load**.
+
+# Seed Initial Data (Optional)
+This will populate the database with essential configuration (Jobs, Providers, Symbols).
+```bash
+node scripts/seed.js
+```
+
+# Backup/Export Data (For Developers)
+To update the seed file with current database state:
+```bash
+node scripts/generate-seed.js
+```
 ```
 
 PocketBase will run at http://localhost:8090

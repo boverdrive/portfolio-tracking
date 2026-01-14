@@ -790,5 +790,558 @@
         ],
         "indexes": [],
         "system": false
+    },
+    {
+        "id": "pbc_api_providers",
+        "listRule": "",
+        "viewRule": "",
+        "createRule": "",
+        "updateRule": "",
+        "deleteRule": "",
+        "name": "api_providers",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_market_id_001",
+                "max": 50,
+                "min": 1,
+                "name": "market_id",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_provider_name_002",
+                "max": 100,
+                "min": 1,
+                "name": "provider_name",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_provider_type_003",
+                "max": 50,
+                "min": 1,
+                "name": "provider_type",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_api_url_004",
+                "max": 500,
+                "min": 0,
+                "name": "api_url",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "number_priority_005",
+                "max": null,
+                "min": 1,
+                "name": "priority",
+                "onlyInt": true,
+                "presentable": false,
+                "required": true,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "bool_enabled_006",
+                "name": "enabled",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
+            },
+            {
+                "hidden": false,
+                "id": "number_timeout_ms_007",
+                "max": 60000,
+                "min": 1000,
+                "name": "timeout_ms",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            }
+        ],
+        "indexes": [
+            "CREATE INDEX idx_api_providers_market ON api_providers (market_id)",
+            "CREATE INDEX idx_api_providers_priority ON api_providers (market_id, priority)"
+        ],
+        "system": false
+    },
+    {
+        "id": "asset_price_history_col",
+        "name": "asset_price_history",
+        "type": "base",
+        "system": false,
+        "fields": [
+            {
+                "id": "text_symbol_aph_01",
+                "name": "symbol",
+                "type": "text",
+                "system": false,
+                "required": true,
+                "presentable": true,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "text_asset_type_aph_02",
+                "name": "asset_type",
+                "type": "text",
+                "system": false,
+                "required": true,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "text_market_aph_03",
+                "name": "market",
+                "type": "text",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "number_price_aph_04",
+                "name": "price",
+                "type": "number",
+                "system": false,
+                "required": true,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "noDecimal": false
+                }
+            },
+            {
+                "id": "text_currency_aph_05",
+                "name": "currency",
+                "type": "text",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "options": {
+                    "min": null,
+                    "max": null,
+                    "pattern": ""
+                }
+            },
+            {
+                "id": "date_recorded_at_aph_06",
+                "name": "recorded_at",
+                "type": "date",
+                "system": false,
+                "required": true,
+                "presentable": true,
+                "unique": false,
+                "options": {
+                    "min": "",
+                    "max": ""
+                }
+            },
+            {
+                "id": "autodate_created_aph_07",
+                "name": "created",
+                "type": "autodate",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "onCreate": true,
+                "onUpdate": false,
+                "options": {}
+            },
+            {
+                "id": "autodate_updated_aph_08",
+                "name": "updated",
+                "type": "autodate",
+                "system": false,
+                "required": false,
+                "presentable": false,
+                "unique": false,
+                "onCreate": true,
+                "onUpdate": true,
+                "options": {}
+            }
+        ],
+        "indexes": [
+            "CREATE INDEX `idx_aph_symbol_date` ON `asset_price_history` (`symbol`, `recorded_at`)"
+        ],
+        "listRule": "",
+        "viewRule": "",
+        "createRule": "",
+        "updateRule": null,
+        "deleteRule": null,
+        "options": {}
+    },
+    {
+        "id": "pbc_api_call_logs",
+        "listRule": "",
+        "viewRule": "",
+        "createRule": "",
+        "updateRule": "",
+        "deleteRule": "",
+        "name": "api_call_logs",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_provider_type_001",
+                "max": 50,
+                "min": 1,
+                "name": "provider_type",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_market_id_002",
+                "max": 50,
+                "min": 0,
+                "name": "market_id",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_symbol_003",
+                "max": 50,
+                "min": 1,
+                "name": "symbol",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_status_004",
+                "max": 20,
+                "min": 1,
+                "name": "status",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "number_response_time_005",
+                "max": null,
+                "min": 0,
+                "name": "response_time_ms",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_price_006",
+                "max": null,
+                "min": null,
+                "name": "price",
+                "onlyInt": false,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_currency_007",
+                "max": 10,
+                "min": 0,
+                "name": "currency",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_error_message_008",
+                "max": 1000,
+                "min": 0,
+                "name": "error_message",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_request_url_009",
+                "max": 1000,
+                "min": 0,
+                "name": "request_url",
+                "pattern": "",
+                "presentable": false,
+                "primaryKey": false,
+                "required": false,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "autodate_created_010",
+                "name": "created",
+                "onCreate": true,
+                "onUpdate": false,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "autodate"
+            }
+        ],
+        "indexes": [
+            "CREATE INDEX idx_api_call_logs_provider ON api_call_logs (provider_type)",
+            "CREATE INDEX idx_api_call_logs_symbol ON api_call_logs (symbol)",
+            "CREATE INDEX idx_api_call_logs_status ON api_call_logs (status)",
+            "CREATE INDEX idx_api_call_logs_created ON api_call_logs (created)"
+        ],
+        "system": false
+    },
+    {
+        "id": "pbc_api_rate_limits",
+        "listRule": "",
+        "viewRule": "",
+        "createRule": "",
+        "updateRule": "",
+        "deleteRule": "",
+        "name": "api_rate_limits",
+        "type": "base",
+        "fields": [
+            {
+                "autogeneratePattern": "[a-z0-9]{15}",
+                "hidden": false,
+                "id": "text3208210256",
+                "max": 15,
+                "min": 15,
+                "name": "id",
+                "pattern": "^[a-z0-9]+$",
+                "presentable": false,
+                "primaryKey": true,
+                "required": true,
+                "system": true,
+                "type": "text"
+            },
+            {
+                "autogeneratePattern": "",
+                "hidden": false,
+                "id": "text_api_name_001",
+                "max": 50,
+                "min": 1,
+                "name": "api_name",
+                "pattern": "",
+                "presentable": true,
+                "primaryKey": false,
+                "required": true,
+                "system": false,
+                "type": "text"
+            },
+            {
+                "hidden": false,
+                "id": "number_rpm_002",
+                "max": null,
+                "min": 0,
+                "name": "requests_per_minute",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_rpd_003",
+                "max": null,
+                "min": 0,
+                "name": "requests_per_day",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_cmc_004",
+                "max": null,
+                "min": 0,
+                "name": "current_minute_count",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "number_cdc_005",
+                "max": null,
+                "min": 0,
+                "name": "current_day_count",
+                "onlyInt": true,
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "number"
+            },
+            {
+                "hidden": false,
+                "id": "date_mra_006",
+                "max": "",
+                "min": "",
+                "name": "minute_reset_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date_dra_007",
+                "max": "",
+                "min": "",
+                "name": "day_reset_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "date_lra_008",
+                "max": "",
+                "min": "",
+                "name": "last_request_at",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            },
+            {
+                "hidden": false,
+                "id": "bool_ib_009",
+                "name": "is_blocked",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "bool"
+            },
+            {
+                "hidden": false,
+                "id": "date_bu_010",
+                "max": "",
+                "min": "",
+                "name": "blocked_until",
+                "presentable": false,
+                "required": false,
+                "system": false,
+                "type": "date"
+            }
+        ],
+        "indexes": [],
+        "system": false
     }
 ]

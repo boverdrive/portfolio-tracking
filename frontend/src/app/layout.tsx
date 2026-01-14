@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Portfolio Tracker | หุ้น TFEX Crypto",
+  title: "PT - Portfolio Tracking",
   description: "ติดตามพอร์ตการลงทุนของคุณ แสดงกำไร/ขาดทุน แบบ Real-time",
   keywords: ["portfolio", "stocks", "crypto", "TFEX", "investment", "tracking"],
 };

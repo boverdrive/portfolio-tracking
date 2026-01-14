@@ -299,13 +299,19 @@ export default function Dashboard() {
                 <div className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-between h-16">
                         <div className="flex items-center gap-3">
+                            {/* OLD LOGO (Commented out for backup)
                             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-blue-500 flex items-center justify-center shadow-lg shadow-emerald-500/25">
                                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                                 </svg>
                             </div>
+                            */}
+                            {/* NEW LOGO */}
+                            <div className="w-10 h-10 relative">
+                                <img src="/logo.svg" alt="PT Logo" className="w-full h-full object-contain" />
+                            </div>
                             <div>
-                                <h1 className="text-xl font-bold text-white">Portfolio Tracker</h1>
+                                <h1 className="text-xl font-bold text-white">PT - Portfolio Tracking</h1>
                                 <p className="text-xs text-gray-500">{t('หุ้น • TFEX • Crypto • ทองคำ', 'Stocks • TFEX • Crypto • Gold')}</p>
                             </div>
                         </div>
@@ -576,7 +582,7 @@ export default function Dashboard() {
             <footer className="border-t border-gray-800/50 mt-12 py-6 pb-16">
                 <div className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8">
                     <p className="text-center text-gray-600 text-sm">
-                        Portfolio Tracker • ราคา Crypto จาก CoinGecko • แสดงเป็น {displayCurrency}
+                        PT - Portfolio Tracking • ราคา Crypto จาก CoinGecko • แสดงเป็น {displayCurrency}
                     </p>
                 </div>
             </footer>
