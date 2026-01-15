@@ -157,14 +157,26 @@ See `.env.sample` for all available options. Key configurations include:
 
 ## 📊 Supported Assets
 
-### Crypto (via CoinGecko)
-- BTC, ETH, BNB, SOL, XRP, ADA, DOGE, DOT, MATIC, AVAX...
+### 🪙 Crypto
+- **Sources**: CoinGecko, Binance, OKX, Bitkub
+- **Assets**: BTC, ETH, BNB, SOL, XRP, DOGE, KUB, JFIN, SIX...
+- **Market Types**: Spot, Futures (Binance)
 
-### Thai Stocks (Mock - Settrade API pending)
-- PTT, ADVANC, CPALL, AOT, KBANK, SCB, GULF, DELTA, BTS, TRUE...
+### 🇹🇭 Thai Stocks & Equity (SET)
+- **Source**: Yahoo Finance
+- **Assets**: PTT, AOT, DELTA, KBANK, SCB, CPALL, ADVANC, GULF...
+- **Coverage**: Most stocks listed on SET (approx. 15 min delay standard)
 
-### TFEX
-- S50, S50H25...
+### 🇺🇸 Foreign Stocks (US)
+- **Source**: Yahoo Finance
+- **Assets**: AAPL, TSLA, NVDA, MSFT, GOOGL, AMZN, META, COIN...
+- **ETFs**: SPY, QQQ, VOO, ARKK...
+
+### 📉 Commodities & Futures (TFEX)
+- **Source**: Yahoo Finance & Thai Gold API
+- **Gold**: Thai Gold (96.5%), Gold Spot (XAU), Gold Futures (GF)
+- **Derivatives**: SET50 Index Futures (S50), USD Futures
+- **Others**: Silver (XAG), Oil
 
 ## 📝 License
 
