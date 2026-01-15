@@ -1,24 +1,18 @@
 # Build stage
-FROM rust:1.81-bookworm as builder
+FROM rust:bookworm AS builder
 
 WORKDIR /app
 
-# Copy dependency files first to cache dependencies
-COPY Cargo.toml Cargo.lock ./
-
-# Create dummy src/main.rs to build dependencies
-RUN mkdir src && \
-    echo "fn main() {println!(\"if you see this, the build broke\")}" > src/main.rs && \
-    cargo build --release && \
-    rm -rf src
+# Install build dependencies (openssl, etc.)
+RUN apt-get update && \
+    apt-get install -y pkg-config libssl-dev cmake && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy source code
 COPY . .
 
 # Build the application
-# We touch src/main.rs to force rebuild of the application code
-RUN touch src/main.rs && \
-    cargo build --release
+RUN cargo build --release
 
 # Runtime stage
 FROM debian:bookworm-slim

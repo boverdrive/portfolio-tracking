@@ -2,13 +2,39 @@
 
 แอปพลิเคชันสำหรับติดตามการลงทุนในหุ้น, TFEX และ Cryptocurrency พร้อมแสดงกำไร/ขาดทุน real-time
 
-## ✨ Features
+## ✨ Features (ความสามารถหลัก)
 
-- 📊 **Dashboard** แสดงภาพรวมพอร์ตโฟลิโอ
-- 💰 **P&L Tracking** คำนวณกำไร/ขาดทุนอัตโนมัติ
-- 📈 **ราคา Real-time** จาก CoinGecko (Crypto) และ Settrade (หุ้นไทย)
-- 🏦 **รองรับหลายประเภท** หุ้น, TFEX, Crypto
-- 💾 **บันทึกข้อมูล** ด้วย PocketBase
+### 📈 Portfolio Management (จัดการพอร์ตโฟลิโอ)
+- **Multi-Asset Support**: Track Cryptocurrency, Thai Stocks (SET), and TFEX in a single place.
+  - *รองรับสินทรัพย์หลากหลาย*: ติดตามได้ทั้ง Crypto, หุ้นไทย และ TFEX ในที่เดียว
+- **Real-time Valuation**: Automatic price updates from CoinGecko and Settrade.
+  - *มูลค่าเรียลไทม์*: อัปเดตราคาตลาดอัตโนมัติจาก CoinGecko และ Settrade
+- **Multi-Currency Display**: View your portfolio value in THB, USD, or BTC.
+  - *แสดงผลหลายสกุลเงิน*: เลือกดูมูลค่าพอร์ตในหน่วย THB, USD หรือ BTC ได้ทันที
+
+### 📊 Analysis & Performance (การวิเคราะห์และผลตอบแทน)
+- **Interactive Dashboard**: Visual overview of Net Worth, Daily P&L, and asset allocation.
+  - *แดชบอร์ดอัจฉริยะ*: ภาพรวมมูลค่าทรัพย์สิน กำไร/ขาดทุนรายวัน และสัดส่วนการลงทุน
+- **Profit & Loss Tracking**: Detailed breakdown of Unrealized and Realized Gains.
+  - *ติดตามกำไร/ขาดทุน*: แยกดู Unrealized (ถืออยู่) และ Realized (ขายแล้ว) ได้อย่างชัดเจน
+- **Monthly Performance**: Calendar view of your trading performance month-by-month.
+  - *ผลตอบแทนรายเดือน*: ดูประวัติผลงานการเทรดแยกตามเดือน
+- **Asset Breakdown**: Drill-down view into specific asset classes and individual holdings.
+  - *เจาะลึกสินทรัพย์*: ดูรายละเอียดสัดส่วนรายสินทรัพย์และรายตัว
+
+### 📝 Transaction System (ระบบบันทึกธุรกรรม)
+- **Complete History**: Record Buy, Sell, Deposit, and Withdrawal transactions.
+  - *บันทึกครบถ้วน*: รองรับการ ซื้อ, ขาย, ฝาก, ถอน
+- **Bulk Import**: Easily import past transactions via CSV or JSON.
+  - *นำเข้าข้อมูล*: รองรับการ Import ประวัติการเทรดจำนวนมาก
+- **Cost Basis Calculation**: Automatic handling of average cost (AVG Price).
+  - *คำนวณต้นทุน*: ระบบคำนวณราคาเฉลี่ยให้อัตโนมัติ
+
+### 🔒 Security & System (ความปลอดภัยและระบบ)
+- **Self-Hosted**: You own your data. Powered by PocketBase and Docker.
+  - *เป็นเจ้าของข้อมูล*: ข้อมูลทั้งหมดอยู่บนเครื่องของคุณเอง ทำงานผ่าน PocketBase
+- **OAuth Integration**: Secure login support (e.g., via PocketID).
+  - *รองรับ OAuth*: เชื่อมต่อระบบล็อกอินภายนอกได้
 
 ## 🛠 Tech Stack
 
@@ -45,129 +71,89 @@ portfolio-tracking/
 - [Node.js](https://nodejs.org/) (18+)
 - [PocketBase](https://pocketbase.io/) (optional - ใช้ in-memory storage ได้)
 
-### 1. Start Backend
+## 🚀 Getting Started
 
-```bash
-cd backend
-cp .env.example .env  # (optional) แก้ไข config
-cargo run
-```
+### Prerequisites
 
-Backend จะรันที่ http://localhost:3001
+- [Docker](https://www.docker.com/) (Required for recommended setup)
+- [Node.js](https://nodejs.org/) (18+) & [Rust](https://rustup.rs/) (Only for local development)
 
-### 2. Start Frontend
+### 1. Quick Start (Docker Compose) - Recommended
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+The easiest way to run the application is using Docker Compose.
 
-Frontend จะรันที่ http://localhost:3000
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd portfolio-tracking
+   ```
 
-### 4. Run with Docker (Recommended)
+2. **Configure Environment**:
+   Copy the sample environment file and edit it with your settings.
+   ```bash
+   cp .env.sample .env
+   # Edit .env with your favorite editor
+   # nano .env
+   ```
+   *Make sure to set `POCKETBASE_ADMIN_PASSWORD` and other secrets.*
 
-```bash
-docker compose up -d --build
-```
+3. **Start the Stack**:
+   ```bash
+   docker compose up -d
+   ```
 
-- **Frontend**: http://localhost:3000
-- **Backend**: http://localhost:3001
-- **PocketBase Admin**: http://localhost:8090/_/ (Login with admin credentials in `backend/src/config.rs` or setup new)
+4. **Create Superuser (First Time Only)**:
+   Check the logs to confirm the service is running and find the Admin UI URL.
+   ```bash
+   docker compose logs -f pocketbase
+   ```
+   > Look for: `Admin UI: http://0.0.0.0:8090/_/`
+   
+   Open http://localhost:8090/_/ in your browser. You will be prompted to create the first admin account (email/password).
+   *Note: Use these credentials to set `POCKETBASE_ADMIN_EMAIL` and `POCKETBASE_ADMIN_PASSWORD` in your `.env` for the backend to connect.*
 
-### 3. Start PocketBase (Manual Layout)
+5. **Access the App**:
+   - **Frontend**: http://localhost:3000 (or your configured `FRONTEND_PORT`)
+   - **Backend**: http://localhost:3001 (or your configured `BACKEND_PORT`)
+   - **PocketBase Admin**: http://localhost:8090/_/
 
-```bash
-# Download PocketBase from https://pocketbase.io/docs/
-./pocketbase serve
+### 2. Manual Setup (Local Development)
 
-# Import Schema
-1. Go to http://localhost:8090/_/ > Settings > Import collections
-2. Select `backend/pb_schema_v035.json` and choose **Load**.
+If you want to run services individually without Docker (except PocketBase which is recommended to run separately or via the binary).
 
-# Seed Initial Data (Optional)
-This will populate the database with essential configuration (Jobs, Providers, Symbols).
-```bash
-node scripts/seed.js
-```
+#### Backend
+1. `cd backend`
+2. `cp .env.example .env` (Adjust as needed)
+3. `cargo run`
 
-# Backup/Export Data (For Developers)
-To update the seed file with current database state:
-```bash
-node scripts/generate-seed.js
-```
-```
+#### Frontend
+1. `cd frontend`
+2. `npm install`
+3. `npm run dev`
 
-PocketBase will run at http://localhost:8090
+---
 
-## 📡 API Endpoints
+## 🔧 Environment Variables (.env)
 
-### Transactions
+The application is configured utilizing a single root `.env` file when running with Docker Compose.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/transactions` | List all transactions |
-| POST | `/api/transactions` | Create new transaction |
-| GET | `/api/transactions/:id` | Get transaction by ID |
-| PUT | `/api/transactions/:id` | Update transaction |
-| DELETE | `/api/transactions/:id` | Delete transaction |
+See `.env.sample` for all available options. Key configurations include:
 
-### Portfolio
+### General
+- `FRONTEND_PORT`: Port for the Next.js frontend (default: `3000`)
+- `BACKEND_PORT`: Port for the Rust backend (default: `3001`)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/portfolio` | Get portfolio with P&L |
-| GET | `/api/portfolio/summary` | Get summary only |
-| GET | `/api/portfolio/type/:type` | Filter by asset type |
+### PocketBase
+- `POCKETBASE_ADMIN_EMAIL`: Admin email for backend connection
+- `POCKETBASE_ADMIN_PASSWORD`: Admin password for backend connection
 
-### Prices
+### APIs
+- `COINGECKO_API_URL`: URL for Crypto prices
+- `SETTRADE_API_URL`: URL for Thai Stock prices (if available)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/prices/:symbol?asset_type=crypto` | Get price |
-| POST | `/api/prices/batch` | Get multiple prices |
-| POST | `/api/prices/cache/clear` | Clear cache |
-
-## 💡 Usage Example
-
-### Add a Buy Transaction
-
-```bash
-curl -X POST http://localhost:3001/api/transactions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "asset_type": "crypto",
-    "symbol": "BTC",
-    "action": "buy",
-    "quantity": 0.1,
-    "price": 1500000,
-    "fees": 100
-  }'
-```
-
-### Get Portfolio
-
-```bash
-curl http://localhost:3001/api/portfolio
-```
-
-## 🔧 Environment Variables
-
-### Backend (.env)
-
-```env
-SERVER_HOST=0.0.0.0
-SERVER_PORT=3001
-POCKETBASE_URL=http://127.0.0.1:8090
-COINGECKO_API_URL=https://api.coingecko.com/api/v3
-PRICE_CACHE_TTL=60
-```
-
-### Frontend (.env.local)
-
-```env
-NEXT_PUBLIC_API_URL=http://localhost:3001
-```
+### Security
+- `JWT_SECRET`: Secret key for signing tokens
+- `OAUTH_*`: Configuration for OAuth providers (e.g. PocketID)
 
 ## 📊 Supported Assets
 
@@ -183,3 +169,30 @@ NEXT_PUBLIC_API_URL=http://localhost:3001
 ## 📝 License
 
 MIT
+
+## 🐳 Docker Distribution (For Developers)
+
+### 1. Build and Publish Images
+To share this application with others, you can build and push Docker images to Docker Hub (or GHCR).
+We include a script that uses `docker buildx` to build for both AMD64 (Linux servers) and ARM64 (Mac M1/M2).
+
+```bash
+# Login to Docker Hub first
+docker login
+
+# Run the publish script (default user: padetta)
+./scripts/publish-docker.sh YOUR_DOCKERHUB_USERNAME
+```
+
+### 2. How Others Can Run It
+Give them the `docker-compose.prod.yml` file and tell them to run:
+
+```bash
+# Set the username environment variable (optional if defaults match)
+export DOCKER_USER=YOUR_DOCKERHUB_USERNAME
+
+# Start the stack using pre-built images
+docker compose -f docker-compose.prod.yml up -d
+```
+
+This will download the images from Docker Hub and start the app without needing to build source code.
