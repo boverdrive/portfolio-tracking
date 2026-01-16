@@ -128,6 +128,8 @@ pub enum TradeAction {
     CloseLong,
     CloseShort,
     Dividend,
+    Deposit,
+    Withdraw,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

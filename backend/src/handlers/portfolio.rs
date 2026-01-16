@@ -61,6 +61,7 @@ pub async fn get_portfolio(
             TradeAction::Long | TradeAction::CloseLong => "long",
             TradeAction::Short | TradeAction::CloseShort => "short",
             TradeAction::Dividend => "spot",
+            TradeAction::Deposit | TradeAction::Withdraw => "spot",
         };
         
         let market_key = tx.market.as_ref().map(|m| m.to_string()).unwrap_or_default();
@@ -102,8 +103,8 @@ pub async fn get_portfolio(
         }
         
         match tx.action {
-            TradeAction::Buy | TradeAction::Long => {
-                // Buy, Long (open buy) - increase long position
+            TradeAction::Buy | TradeAction::Long | TradeAction::Deposit => {
+                // Buy, Long, Deposit - increase position
                 let new_quantity = asset.quantity + tx_quantity;
                 
                 // Update Weighted Average Cost (PRICE)
@@ -199,6 +200,27 @@ pub async fn get_portfolio(
                     
                     asset.realized_pnl += pnl;
                     asset.quantity -= ratio * asset.quantity.abs(); // reduce towards 0
+                }
+            }
+            TradeAction::Withdraw => {
+                // Withdraw - reduce position like Sell, but NO Realized PnL
+                if asset.quantity > 0.0 {
+                    // Reduce quantity
+                    let ratio = tx_quantity / asset.quantity;
+                    
+                    // Reduce Fees proportionally
+                    // Fees paid for withdrawal are expenses, but not necessarily "trade PnL"
+                    // However, we subtract them from total_fees to keep bookkeeping clean
+                    let fee_portion = asset.total_fees * ratio;
+                    asset.total_fees -= fee_portion;
+                    
+                    // Reduce Total Cost (Invested) proportionally
+                    // This is key: getting money OUT reduces your invested principal
+                    asset.total_cost -= asset.total_cost * ratio;
+                    
+                    // No PnL calculation for Withdraw
+                    // Just reduce the asset size
+                    asset.quantity -= ratio * asset.quantity.abs(); 
                 }
             }
             TradeAction::CloseShort => {

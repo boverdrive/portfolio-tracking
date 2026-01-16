@@ -820,8 +820,31 @@ impl PriceService {
             return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
         }
 
+        // For SET stocks, use Yahoo Finance with .BK suffix
+        let yahoo_symbol = format!("{}.BK", symbol_upper);
+        let url = format!(
+            "{}/api/price-history/{}?period=1d&interval=1d",
+            self.config.yahoo_finance_service_url,
+            yahoo_symbol
+        );
+
+        tracing::info!("Fetching Thai stock price from Yahoo Finance Service: {}", url);
+        
+        let start = Instant::now();
+
+        let response = self.client
+            .get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        
+        // Record the API call
+        self.record_api_call("yahoo_finance").await;
+        
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
         if !response.status().is_success() {
-            let error_msg = format!("Yahoo Finance API failed for {}, using mock", symbol);
+            let error_msg = format!("Yahoo Finance Service failed for {}, using mock", symbol);
             tracing::warn!("{}", error_msg);
             self.log_api_call_async("yahoo_finance", Some("SET"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
             return self.fetch_tfex_mock_price(&symbol_upper).await;
@@ -829,14 +852,12 @@ impl PriceService {
 
         let data: serde_json::Value = response.json().await?;
         
-        // Yahoo Finance response format: chart.result[0].meta.regularMarketPrice
+        // Yahoo Finance Service response format: { "data": [ { "close": ... } ] }
         let price = data
-            .get("chart")
-            .and_then(|c| c.get("result"))
-            .and_then(|r| r.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|item| item.get("meta"))
-            .and_then(|meta| meta.get("regularMarketPrice"))
+            .get("data")
+            .and_then(|d| d.as_array())
+            .and_then(|arr| arr.last())
+            .and_then(|item| item.get("close"))
             .and_then(|v| v.as_f64())
             .ok_or_else(|| {
                 let error_msg = format!("Could not parse Yahoo Finance price for {}", symbol);
@@ -942,18 +963,18 @@ impl PriceService {
         self.check_rate_limit("yahoo_finance").await?;
         
         let url = format!(
-            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+            "{}/api/price-history/{}?period=1d&interval=1d",
+            self.config.yahoo_finance_service_url,
             yahoo_symbol
         );
 
-        tracing::info!("Fetching TFEX price from Yahoo Finance: {} -> {}", original_symbol, url);
+        tracing::info!("Fetching TFEX price from Yahoo Finance Service: {} -> {}", original_symbol, url);
         
         let start = Instant::now();
 
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send()
             .await?;
         
@@ -961,14 +982,8 @@ impl PriceService {
         
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        if response.status().as_u16() == 429 {
-            self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
-            self.log_api_call_async("yahoo_finance", Some("TFEX"), original_symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
-            return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
-        }
-
         if !response.status().is_success() {
-            let error_msg = format!("Yahoo Finance API error: {}", response.status());
+            let error_msg = format!("Yahoo Finance Service error: {}", response.status());
             self.log_api_call_async("yahoo_finance", Some("TFEX"), original_symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
             return Err(AppError::ExternalApiError(error_msg));
         }
@@ -976,12 +991,10 @@ impl PriceService {
         let data: serde_json::Value = response.json().await?;
         
         let price = data
-            .get("chart")
-            .and_then(|c| c.get("result"))
-            .and_then(|r| r.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|item| item.get("meta"))
-            .and_then(|meta| meta.get("regularMarketPrice"))
+            .get("data")
+            .and_then(|d| d.as_array())
+            .and_then(|arr| arr.last())
+            .and_then(|item| item.get("close"))
             .and_then(|v| v.as_f64())
             .ok_or_else(|| {
                                 let error_msg = format!("Could not parse price for {}", original_symbol);
@@ -1013,20 +1026,20 @@ impl PriceService {
         
         let symbol_upper = symbol.to_uppercase();
         
-        // Try Yahoo Finance first
+        // Try Yahoo Finance Service first
         let url = format!(
-            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+            "{}/api/price-history/{}?period=1d&interval=1d",
+            self.config.yahoo_finance_service_url,
             symbol_upper
         );
 
-        tracing::info!("Fetching foreign stock price from Yahoo Finance: {}", url);
+        tracing::info!("Fetching foreign stock price from Yahoo Finance Service: {}", url);
         
         let start = Instant::now();
 
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send()
             .await?;
         
@@ -1035,14 +1048,8 @@ impl PriceService {
         
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        if response.status().as_u16() == 429 {
-            self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
-            self.log_api_call_async("yahoo_finance", Some("Foreign"), symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
-            return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
-        }
-
         if !response.status().is_success() {
-            let error_msg = format!("Yahoo Finance API failed for {}, using mock", symbol);
+            let error_msg = format!("Yahoo Finance Service failed for {}, using mock", symbol);
             tracing::warn!("{}", error_msg);
             self.log_api_call_async("yahoo_finance", Some("Foreign"), symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
             return self.fetch_foreign_stock_mock(&symbol_upper, market);
@@ -1050,34 +1057,28 @@ impl PriceService {
 
         let data: serde_json::Value = response.json().await?;
         
-        // Yahoo Finance response format: chart.result[0].meta
-        let meta = data
-            .get("chart")
-            .and_then(|c| c.get("result"))
-            .and_then(|r| r.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|item| item.get("meta"));
+        // Yahoo Finance Service response
+        let price_opt = data
+            .get("data")
+            .and_then(|d| d.as_array())
+            .and_then(|arr| arr.last())
+            .and_then(|item| item.get("close"))
+            .and_then(|v| v.as_f64());
             
-        if let Some(meta) = meta {
-            let price = meta.get("regularMarketPrice")
-                .and_then(|v| v.as_f64());
-            let currency = meta.get("currency")
-                .and_then(|v| v.as_str())
-                .unwrap_or("USD");
+        if let Some(price) = price_opt {
+            let currency = "USD"; // Default to USD for foreign stocks (US market mostly)
                 
-            if let Some(price) = price {
-                tracing::info!("Yahoo Finance price for {}: {} {}", symbol, price, currency);
-                
-                // Log successful API call
-                self.log_api_call_async("yahoo_finance", Some("Foreign"), symbol, "success", elapsed_ms, Some(price), Some(currency), None, Some(&url));
-                
-                return Ok(PriceEntry {
-                    symbol: symbol_upper,
-                    price,
-                    currency: currency.to_string(),
-                    updated_at: Utc::now(),
-                });
-            }
+            tracing::info!("Yahoo Finance price for {}: {} {}", symbol, price, currency);
+            
+            // Log successful API call
+            self.log_api_call_async("yahoo_finance", Some("Foreign"), symbol, "success", elapsed_ms, Some(price), Some(currency), None, Some(&url));
+            
+            return Ok(PriceEntry {
+                symbol: symbol_upper,
+                price,
+                currency: currency.to_string(),
+                updated_at: Utc::now(),
+            });
         }
         
         // Fallback to mock if parsing fails
@@ -1228,31 +1229,25 @@ impl PriceService {
         self.check_rate_limit("yahoo_finance").await?;
         
         let url = format!(
-            "https://query1.finance.yahoo.com/v8/finance/chart/{}?interval=1d&range=1d",
+            "{}/api/price-history/{}?period=1d&interval=1d",
+            self.config.yahoo_finance_service_url,
             yahoo_symbol
         );
 
-        tracing::info!("Fetching Precious Metals price from Yahoo Finance: {}", url);
+        tracing::info!("Fetching Precious Metals price from Yahoo Finance Service: {}", url);
         let start = Instant::now();
 
         let response = self.client
             .get(&url)
             .header("Accept", "application/json")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send()
             .await?;
         
         self.record_api_call("yahoo_finance").await;
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        if response.status().as_u16() == 429 {
-            self.record_rate_limit_hit("yahoo_finance", Some(60)).await;
-            self.log_api_call_async("yahoo_finance", Some("COMEX"), original_symbol, "error", elapsed_ms, None, None, Some("Rate limit exceeded"), Some(&url));
-            return Err(AppError::ExternalApiError("Yahoo Finance rate limit exceeded".to_string()));
-        }
-
         if !response.status().is_success() {
-             let error_msg = format!("Yahoo Finance error: {}", response.status());
+             let error_msg = format!("Yahoo Finance Service error: {}", response.status());
              self.log_api_call_async("yahoo_finance", Some("COMEX"), original_symbol, "error", elapsed_ms, None, None, Some(&error_msg), Some(&url));
              return Err(AppError::ExternalApiError(error_msg));
         }
@@ -1260,12 +1255,10 @@ impl PriceService {
         let data: serde_json::Value = response.json().await?;
         
         let price = data
-            .get("chart")
-            .and_then(|c| c.get("result"))
-            .and_then(|r| r.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|item| item.get("meta"))
-            .and_then(|meta| meta.get("regularMarketPrice"))
+            .get("data")
+            .and_then(|d| d.as_array())
+            .and_then(|arr| arr.last())
+            .and_then(|item| item.get("close"))
             .and_then(|v| v.as_f64())
             .ok_or_else(|| {
                 let error_msg = format!("Could not parse Yahoo Finance price for {}", original_symbol);
@@ -1329,6 +1322,8 @@ impl PriceService {
             updated_at: Utc::now(),
         })
     }
+
+
 
     /// Map common crypto symbols to CoinGecko IDs
     fn get_coingecko_id(&self, symbol: &str) -> String {

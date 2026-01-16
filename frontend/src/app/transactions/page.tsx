@@ -242,6 +242,7 @@ export default function TransactionsPage() {
                                 editTransaction={editingTransaction}
                                 onSuccess={handleFormSuccess}
                                 onClose={handleFormClose}
+                                portfolioAssets={portfolio?.assets}
                             />
                         </div>
                     )}

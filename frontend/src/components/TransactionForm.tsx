@@ -116,6 +116,20 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
     });
     const [orderAmountStr, setOrderAmountStr] = useState('');
     const [inputMode, setInputMode] = useState<'quantity' | 'total'>('quantity');
+    const [toAccountId, setToAccountId] = useState<string>('');
+    const [isTransferMode, setIsTransferMode] = useState(false);
+
+    // Toggle Transfer Mode
+    useEffect(() => {
+        if (isTransferMode) {
+            setFormData(prev => ({ ...prev, action: 'transfer' }));
+        } else {
+            setFormData(prev => ({
+                ...prev,
+                action: prev.asset_type === 'tfex' ? 'long' : 'buy'
+            }));
+        }
+    }, [isTransferMode]);
 
     const [formData, setFormData] = useState<CreateTransactionRequest>(() => {
         if (editTransaction) {
@@ -295,12 +309,12 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
         setFormData({
             ...formData,
             asset_type: type,
-            symbol: '',
             symbol_name: undefined,
             action: defaultAction,
             market: defaultMarket,
             currency: getCurrencyForAssetType(type, defaultMarket),
             unit: type === 'gold' ? 'baht' : (type === 'commodity' ? 'oz' : undefined),
+            symbol: '',
         });
     };
 
@@ -467,6 +481,9 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             { value: 'buy', label: t('ซื้อ', 'Buy') },
             { value: 'sell', label: t('ขาย', 'Sell') },
             { value: 'dividend', label: t('รับปันผล', 'Receive Dividend') },
+            // { value: 'deposit', label: t('ฝาก', 'Deposit') },
+            // { value: 'withdraw', label: t('ถอน', 'Withdraw') },
+            // { value: 'transfer', label: t('โอนย้าย', 'Transfer') },
         ];
     };
 
@@ -508,8 +525,29 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 timestamp: formData.timestamp ? new Date(formData.timestamp).toISOString() : new Date().toISOString(),
             };
 
-            if (editTransaction) {
+            if (formData.action === 'transfer') {
+                if (!toAccountId) {
+                    throw new Error(t('กรุณาระบุบัญชีปลายทาง', 'Please select destination account'));
+                }
+                if (payload.account_id === toAccountId) {
+                    throw new Error(t('บัญชีต้นทางและปลายทางต้องต่างกัน', 'Source and destination accounts must be different'));
+                }
+
+                // 1. Withdraw from Source
+                const withdrawPayload = { ...payload, action: 'withdraw' as TradeAction };
+                await createTransaction(withdrawPayload);
+
+                // 2. Deposit to Destination
+                const depositPayload = {
+                    ...payload,
+                    action: 'deposit' as TradeAction,
+                    account_id: toAccountId
+                };
+                await createTransaction(depositPayload);
+            } else if (editTransaction) {
                 // Update existing transaction
+                // Note: If editing a "transfer" (which is actually 2 txs), we only edit THIS one. 
+                // Complex to edit both linked transactions. For now just edit single.
                 await updateTransaction(editTransaction.id, payload);
             } else {
                 // Create new transaction
@@ -612,6 +650,30 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 )}
             </div>
 
+            {/* Mode Tabs */}
+            <div className="flex border-b border-gray-700/50">
+                <button
+                    onClick={() => setIsTransferMode(false)}
+                    type="button"
+                    className={`flex-1 py-3 text-sm font-medium transition-all ${!isTransferMode
+                        ? 'text-emerald-400 border-b-2 border-emerald-400 bg-emerald-500/5'
+                        : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/30'
+                        }`}
+                >
+                    {t('ซื้อ/ขาย', 'Trade')}
+                </button>
+                <button
+                    onClick={() => setIsTransferMode(true)}
+                    type="button"
+                    className={`flex-1 py-3 text-sm font-medium transition-all ${isTransferMode
+                        ? 'text-blue-400 border-b-2 border-blue-400 bg-blue-500/5'
+                        : 'text-gray-400 hover:text-gray-300 hover:bg-gray-700/30'
+                        }`}
+                >
+                    {t('โอนย้าย', 'Transfer')}
+                </button>
+            </div>
+
             {/* Form */}
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
                 {error && (
@@ -620,308 +682,89 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     </div>
                 )}
 
-                {/* Asset Type - 2 rows */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">{t('ประเภทสินทรัพย์', 'Asset Type')}</label>
-                    <div className="grid grid-cols-3 gap-2">
-                        {assetTypes.map((type) => (
-                            <button
-                                key={type}
-                                type="button"
-                                onClick={() => handleAssetTypeChange(type)}
-                                className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${formData.asset_type === type
-                                    ? `${getAssetTypeColor(type)} text-white shadow-lg`
-                                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
-                                    }`}
-                            >
-                                {getAssetTypeName(type, settings.language)}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Market Selection */}
-                {availableMarkets.length > 1 && (
-                    <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-2">{t('ตลาด/Exchange', 'Market/Exchange')}</label>
-                        <select
-                            value={formData.market || ''}
-                            onChange={(e) => handleMarketChange(e.target.value as Market)}
-                            className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
-                        >
-                            {availableMarkets.map((market) => {
-                                const marketConfig = settings.markets.find(m => m.id === market);
-                                const displayName = marketConfig
-                                    ? (settings.language === 'th' ? marketConfig.name : marketConfig.nameEn)
-                                    : getMarketName(market, settings.language);
-                                return (
-                                    <option key={market} value={market}>
-                                        {displayName}
-                                    </option>
-                                );
-                            })}
-                        </select>
-                    </div>
-                )}
-
-                {/* Symbol (Moved to top) */}
-                <div className="relative">
-                    <label className="block text-sm font-medium text-gray-400 mb-2">{t('สัญลักษณ์', 'Symbol')}</label>
-                    <input
-                        ref={symbolInputRef}
-                        type="text"
-                        value={formData.symbol}
-                        onChange={(e) => handleSymbolChange(e.target.value)}
-                        onFocus={() => {
-                            if ((formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') && formData.symbol.length >= 1) {
-                                fetchSymbolSuggestions(formData.symbol);
-                            }
-                        }}
-                        placeholder={getSymbolPlaceholder()}
-                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
-                        autoComplete="off"
-                    />
-
-                    {/* Autocomplete Dropdown */}
-                    {showSuggestions && (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') && (
-                        <div
-                            ref={suggestionsRef}
-                            className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto"
-                        >
-                            {isLoadingSuggestions ? (
-                                <div className="px-4 py-3 text-gray-400 text-sm flex items-center gap-2">
-                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                    </svg>
-                                    {t('กำลังค้นหา...', 'Searching...')}
-                                </div>
-                            ) : symbolSuggestions.length > 0 ? (
-                                symbolSuggestions.map((suggestion) => (
-                                    <button
-                                        key={suggestion.symbol}
-                                        type="button"
-                                        onClick={() => handleSelectSuggestion(suggestion)}
-                                        className="w-full px-4 py-2 text-left hover:bg-gray-700/50 transition-colors flex items-center justify-between group"
-                                    >
-                                        <div>
-                                            <span className="text-white font-medium">{suggestion.symbol}</span>
-                                            <span className="text-gray-400 text-sm ml-2">{suggestion.name}</span>
-                                        </div>
-                                        <span className="text-xs text-gray-500 group-hover:text-gray-400">
-                                            {'market' in suggestion ? suggestion.market : ('contract_type' in suggestion ? (suggestion as TfexSymbol).contract_type : '')}
-                                        </span>
-                                    </button>
-                                ))
-                            ) : (
-                                <div className="px-4 py-3 text-gray-400 text-sm">
-                                    {t('ไม่พบผลลัพธ์', 'No results found')}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Display selected symbol name */}
-                    {formData.symbol_name && (
-                        <div className="mt-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                            <span className="text-emerald-400 text-sm">{formData.symbol_name}</span>
-                        </div>
-                    )}
-                </div>
-
-                {/* TFEX Contract Multiplier - Editable */}
-                {formData.asset_type === 'tfex' && formData.symbol && (
-                    <div className="bg-amber-900/30 rounded-lg p-4 border border-amber-700/50">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <label className="block text-sm font-medium text-amber-300">{t('ตัวคูณสัญญา', 'Contract Multiplier')}</label>
-                                <span className="text-xs text-amber-400/70">
-                                    {t('Auto:', 'Auto:')} {getTfexMultiplier(formData.symbol)}x
-                                    {formData.symbol.toUpperCase().startsWith('S50') && ' (THB/point)'}
-                                    {formData.symbol.toUpperCase().startsWith('GF') && ' (THB/0.1 baht)'}
-                                    {formData.symbol.toUpperCase().startsWith('GD') && ' (baht gold)'}
-                                    {formData.symbol.toUpperCase().startsWith('SV') && ' (THB/oz)'}
-                                    {formData.symbol.toUpperCase().startsWith('USD') && ' (USD)'}
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="number"
-                                    value={leverageStr}
+                {isTransferMode ? (
+                    // ==================== TRANSFER UI ====================
+                    <div className="space-y-4">
+                        {/* 1. Asset Selection from Portfolio */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">{t('เลือกสินทรัพย์', 'Select Asset')}</label>
+                            {portfolioAssets && portfolioAssets.length > 0 ? (
+                                <select
+                                    value={formData.symbol ? `${formData.symbol}:${formData.asset_type}:${formData.market || ''}` : ''}
                                     onChange={(e) => {
-                                        setLeverageStr(e.target.value);
-                                        const val = parseFloat(e.target.value);
-                                        setFormData(prev => ({ ...prev, leverage: isNaN(val) ? undefined : val }));
+                                        if (!e.target.value) return;
+                                        const [sym, type, market] = e.target.value.split(':');
+                                        const asset = portfolioAssets.find(a =>
+                                            a.symbol === sym &&
+                                            a.asset_type === type &&
+                                            (a.market || '') === (market || '')
+                                        );
+                                        if (asset) {
+                                            setFormData({
+                                                ...formData,
+                                                asset_type: asset.asset_type,
+                                                symbol: asset.symbol,
+                                                market: asset.market,
+                                                price: asset.avg_cost, // Use Avg Cost to preserve portfolio value
+                                                currency: asset.currency,
+                                                unit: asset.unit,
+                                                action: 'transfer'
+                                            });
+                                            setPriceStr(String(asset.avg_cost));
+                                            setQuantityStr(''); // Reset quantity
+                                        }
                                     }}
-                                    className="w-24 px-3 py-2 text-lg font-bold bg-amber-800/50 border border-amber-600 rounded-lg text-amber-300 text-center focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                                />
-                                <span className="text-amber-400 font-bold">x</span>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Initial Margin (Actual Money Used) - For Futures */}
-                {(formData.asset_type === 'tfex' || (formData.asset_type === 'crypto' && isFuturesMode)) && (
-                    <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-2">{t('เงินหลักประกัน (Initial Margin)', 'Initial Margin')}</label>
-                        <input
-                            type="text"
-                            inputMode="decimal"
-                            value={initialMarginStr}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                                    setInitialMarginStr(val);
-                                    const num = parseFloat(val);
-                                    if (!isNaN(num)) {
-                                        setFormData(prev => ({ ...prev, initial_margin: num }));
-                                    } else if (val === '') {
-                                        setFormData(prev => ({ ...prev, initial_margin: undefined }));
-                                    }
-                                }
-                            }}
-                            placeholder={t('จำนวนเงินที่วางจริง (ไม่รวม Leverage)', 'Actual money used (excluding leverage)')}
-                            className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
-                        />
-                    </div>
-                )}
-
-                {/* Crypto Futures Toggle */}
-                {formData.asset_type === 'crypto' && (
-                    <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
-                        <div className="flex items-center justify-between mb-3">
-                            <div>
-                                <label className="block text-sm font-medium text-white">{t('เทรด Futures', 'Futures Trading')}</label>
-                                <span className="text-xs text-gray-400">{t('Long/Short พร้อมตัวคูณ', 'Long/Short with leverage')}</span>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setIsFuturesMode(!isFuturesMode);
-                                    // Reset action to buy when switching off futures mode
-                                    if (isFuturesMode) {
-                                        setFormData(prev => ({ ...prev, action: 'buy', leverage: undefined, initial_margin: undefined }));
-                                        setLeverageStr('');
-                                        setInitialMarginStr('');
-                                    } else {
-                                        setFormData(prev => ({ ...prev, action: 'long' }));
-                                    }
-                                }}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isFuturesMode ? 'bg-purple-600' : 'bg-gray-600'}`}
-                            >
-                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isFuturesMode ? 'translate-x-6' : 'translate-x-1'}`} />
-                            </button>
-                        </div>
-
-                        {/* Leverage Input */}
-                        {isFuturesMode && (
-                            <div>
-                                <label className="block text-xs text-gray-400 mb-2">{t('ตัวคูณ (Leverage)', 'Leverage')}</label>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    {[5, 10, 20, 50, 100].map((lev) => (
-                                        <button
-                                            key={lev}
-                                            type="button"
-                                            onClick={() => {
-                                                setLeverageStr(String(lev));
-                                                setFormData(prev => ({ ...prev, leverage: lev }));
-                                            }}
-                                            className={`px-3 py-2 text-sm rounded-lg font-medium transition-all border ${Number(formData.leverage) === lev
-                                                ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/25'
-                                                : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:border-gray-500'
-                                                }`}
-                                        >
-                                            {lev}x
-                                        </button>
+                                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all font-mono"
+                                >
+                                    <option value="">{t('เลือกสินทรัพย์ที่จะโอน', 'Select asset to transfer')}</option>
+                                    {portfolioAssets.map((asset, idx) => (
+                                        <option key={`${asset.symbol}:${asset.asset_type}:${asset.market || ''}:${idx}`} value={`${asset.symbol}:${asset.asset_type}:${asset.market || ''}`}>
+                                            {asset.symbol} ({getAssetTypeName(asset.asset_type, settings.language)}) {asset.market ? `[${asset.market}]` : ''} - {t('มี', 'Qty')}: {asset.quantity.toLocaleString()}
+                                        </option>
                                     ))}
-                                    <input
-                                        type="number"
-                                        value={leverageStr}
-                                        onChange={(e) => {
-                                            setLeverageStr(e.target.value);
-                                            const val = parseFloat(e.target.value);
-                                            setFormData(prev => ({ ...prev, leverage: isNaN(val) ? undefined : val }));
-                                        }}
-                                        placeholder={t('อื่นๆ', 'Custom')}
-                                        className={`w-24 px-3 py-2 text-base font-bold rounded-lg text-center transition-all outline-none border-2 ${
-                                            // Highlight when custom value is active (not one of the presets)
-                                            leverageStr && ![5, 10, 20, 50, 100].includes(Number(leverageStr))
-                                                ? 'bg-purple-600/20 border-purple-500 text-purple-300 shadow-sm'
-                                                : 'bg-gray-700 border-gray-600 text-white focus:border-purple-500'
-                                            }`}
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-
-
-                    </div>
-                )}
-
-
-
-                {/* Action */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">{t('ประเภทรายการ', 'Action')}</label>
-                    <div className={`grid gap-2 ${formData.asset_type === 'tfex' ? 'grid-cols-2' : 'grid-cols-2'}`}>
-                        {getActionOptions().map((option) => (
-                            <button
-                                key={option.value}
-                                type="button"
-                                onClick={() => setFormData({ ...formData, action: option.value })}
-                                className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${formData.action === option.value
-                                    ? (option.value === 'buy' || option.value === 'long')
-                                        ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25'
-                                        : (option.value === 'sell' || option.value === 'short')
-                                            ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/25'
-                                            : (option.value === 'close_long')
-                                                ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25'
-                                                : (option.value === 'dividend')
-                                                    ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25'
-                                                    : 'bg-purple-500 text-white shadow-lg shadow-purple-500/25'
-                                    : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
-                                    }`}
-                            >
-                                {option.value === 'buy' ? '🛒 ' : option.value === 'sell' ? '💰 ' : option.value === 'long' ? '📈 ' : option.value === 'short' ? '📉 ' : option.value === 'close_long' ? '✅ ' : option.value === 'dividend' ? '🎁 ' : '🔄 '}
-                                {option.label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-
-
-                {/* Quantity */}
-                {/* Quantity / Amount Input - Hide for Dividend */}
-                {formData.action !== 'dividend' && (
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="block text-sm font-medium text-gray-400">
-                                {inputMode === 'quantity' ? t('จำนวน', 'Quantity') : t('มูลค่ารวม (USDT)', 'Total Value (USDT)')}
-                            </label>
-                            {(formData.asset_type === 'crypto' || formData.asset_type === 'stock') && (
-                                <div className="flex bg-gray-700/50 rounded-lg p-0.5 border border-gray-600/50">
-                                    <button
-                                        type="button"
-                                        onClick={() => setInputMode('quantity')}
-                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'quantity' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                                    >
-                                        Units
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setInputMode('total')}
-                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'total' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                                    >
-                                        Total
-                                    </button>
+                                </select>
+                            ) : (
+                                <div className="p-3 bg-gray-700/30 text-gray-400 rounded-lg text-sm text-center">
+                                    {t('ไม่พบสินทรัพย์ในพอร์ต', 'No assets in portfolio')}
                                 </div>
                             )}
                         </div>
 
-                        {inputMode === 'quantity' ? (
+                        {/* 2. Source Account */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">{t('จากบัญชี (ต้นทาง)', 'From Account (Source)')}</label>
+                            <select
+                                value={formData.account_id || ''}
+                                onChange={(e) => setFormData({ ...formData, account_id: e.target.value })}
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                            >
+                                <option value="">{t('เลือกบัญชี', 'Select Account')}</option>
+                                {accounts.map(account => (
+                                    <option key={account.id} value={account.id}>{account.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* 3. Destination Account */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">{t('ไปยังบัญชี (ปลายทาง)', 'To Account (Destination)')}</label>
+                            <select
+                                value={toAccountId}
+                                onChange={(e) => setToAccountId(e.target.value)}
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                            >
+                                <option value="">{t('เลือกบัญชี', 'Select Account')}</option>
+                                {accounts
+                                    .filter(a => a.id !== formData.account_id) // Exclude source
+                                    .map(account => (
+                                        <option key={account.id} value={account.id}>{account.name}</option>
+                                    ))}
+                            </select>
+                        </div>
+
+                        {/* 4. Quantity */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">{t('จำนวน', 'Quantity')}</label>
                             <input
                                 type="text"
                                 inputMode="decimal"
@@ -931,211 +774,559 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                     if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
                                         setQuantityStr(val);
                                         const num = parseFloat(val);
-                                        if (!isNaN(num)) {
-                                            setFormData(prev => ({ ...prev, quantity: num }));
-                                            // Update order amount preview if price exists
-                                            if (formData.price > 0) {
-                                                setOrderAmountStr((num * formData.price).toFixed(2));
-                                            }
-                                        } else if (val === '') {
-                                            setFormData(prev => ({ ...prev, quantity: 0 }));
-                                        }
+                                        setFormData(prev => ({ ...prev, quantity: isNaN(num) ? 0 : num }));
                                     }
                                 }}
-                                placeholder="0.00000001"
-                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white font-mono text-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
+                                placeholder="0.00"
                             />
-                        ) : (
-                            <div>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        inputMode="decimal"
-                                        value={orderAmountStr}
-                                        onChange={(e) => {
-                                            const val = e.target.value;
-                                            if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                                                setOrderAmountStr(val);
-                                                const amount = parseFloat(val);
-                                                if (!isNaN(amount) && formData.price > 0) {
-                                                    const qty = amount / formData.price;
-                                                    setQuantityStr(qty.toFixed(8));
-                                                    setFormData(prev => ({ ...prev, quantity: qty }));
-                                                }
-                                            }
-                                        }}
-                                        placeholder="1000.00"
-                                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
-                                    />
-                                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                                        <span className="text-gray-400 text-sm">USDT</span>
-                                    </div>
-                                </div>
-                                <div className="mt-1 text-xs text-gray-500 text-right">
-                                    ≈ {quantityStr || '0'} Units
-                                </div>
+                        </div>
+
+
+                        {/* Date/Time for Transfer */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">
+                                📅 {t('วันที่และเวลา', 'Date and Time')}
+                            </label>
+                            <input
+                                type="datetime-local"
+                                value={formData.timestamp || ''}
+                                onChange={(e) => setFormData({ ...formData, timestamp: e.target.value })}
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                            />
+                        </div>
+
+                        {/* Hidden Price Display (Informative) */}
+                        {formData.price > 0 && (
+                            <div className="text-xs text-gray-400">
+                                {t('มูลค่าต้นทุนที่จะโอน: ', 'Cost Basis: ')}
+                                <span className="text-gray-300 font-mono">{formData.price.toLocaleString()}</span> {formData.currency} / unit
                             </div>
                         )}
                     </div>
-                )}
-
-                {/* Unit Selector (Gold/Commodity) - Moved here */}
-                {(formData.asset_type === 'gold' || formData.asset_type === 'commodity') && (
-                    <div className="mb-4 mt-2">
-                        <label className="block text-sm font-medium text-gray-400 mb-2">{t('หน่วย', 'Unit')}</label>
-                        <div className="grid grid-cols-5 gap-2">
-                            {[
-                                { value: 'baht', label: t('บาท', 'Baht') },
-                                { value: 'salung', label: t('สลึง', 'Salung') },
-                                { value: 'oz', label: t('ออนซ์', 'Oz') },
-                                { value: 'gram', label: t('กรัม', 'Gram') },
-                                { value: 'kg', label: t('กิโลกรัม', 'Kg') },
-                            ].map((unit) => (
-                                <button
-                                    key={unit.value}
-                                    type="button"
-                                    onClick={() => setFormData({ ...formData, unit: unit.value })}
-                                    className={`px-2 py-2 rounded-lg text-sm font-medium transition-all ${formData.unit === unit.value
-                                        ? 'bg-amber-500 text-white shadow-lg'
-                                        : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
-                                        }`}
-                                >
-                                    {unit.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Price */}
-                <div>
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                            <label className="text-sm font-medium text-gray-400">
-                                {formData.action === 'dividend' ? t('จำนวนเงินปันผล', 'Dividend Amount') : t('ราคา', 'Price')}
-                            </label>
-                            <select
-                                value={formData.currency || 'THB'}
-                                onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                                className="px-2 py-1 bg-gray-700/50 border border-gray-600/50 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                            >
-                                <option value="THB">THB</option>
-                                <option value="USD">USD</option>
-                                <option value="EUR">EUR</option>
-                                <option value="GBP">GBP</option>
-                                <option value="JPY">JPY</option>
-                                <option value="HKD">HKD</option>
-                                <option value="SGD">SGD</option>
-                                <option value="BTC">BTC</option>
-                                <option value="USDT">USDT</option>
-                            </select>
-                        </div>
-                        <button
-                            type="button"
-                            disabled={!formData.symbol || isFetchingPrice}
-                            onClick={fetchLatestPrice}
-                            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-500/20 hover:bg-blue-500/30 disabled:bg-gray-700/30 disabled:cursor-not-allowed border border-blue-500/30 disabled:border-gray-600/30 rounded-md text-blue-400 disabled:text-gray-500 transition-all"
-                            title={t('ดึงราคาล่าสุด', 'Fetch Latest Price')}
-                        >
-                            {isFetchingPrice ? (
-                                <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                </svg>
-                            ) : (
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                            )}
-                            {t('ดึงราคา', 'Fetch')}
-                        </button>
-                    </div>
-                    <input
-                        type="text"
-                        inputMode="decimal"
-                        value={priceStr}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
-                                setPriceStr(val);
-                                const num = parseFloat(val);
-                                if (!isNaN(num)) {
-                                    setFormData(prev => ({ ...prev, price: num }));
-                                } else if (val === '') {
-                                    setFormData(prev => ({ ...prev, price: 0 }));
-                                }
-                            }
-                        }}
-                        placeholder="0.00"
-                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
-                    />
-                </div>
-
-                {/* Total Preview */}
-                {formData.quantity > 0 && formData.price > 0 && (
-                    <div className="bg-gray-700/30 rounded-lg px-4 py-3">
-                        <div className="flex justify-between items-center text-sm">
-                            <span className="text-gray-400">
-                                {t('มูลค่ารวม', 'Total Value')}
-                                {((formData.leverage || 0) > 1) && (
-                                    <span className="text-amber-400 ml-1">(×{formData.leverage})</span>
-                                )}
-                            </span>
-                            <span className="text-white font-semibold font-mono">
-                                {formData.currency} {((formData.quantity * formData.price) * (formData.leverage || 1)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                            </span>
-                        </div>
-                    </div>
-                )}
-
-                {/* Fees */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">
-                        {t('ค่าธรรมเนียม', 'Fees')} ({formData.currency || 'THB'})
-                    </label>
-                    <input
-                        type="number"
-                        step="any"
-                        value={formData.fees || ''}
-                        onChange={(e) => setFormData({ ...formData, fees: parseFloat(e.target.value) || 0 })}
-                        placeholder="0.00"
-                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
-                    />
-                </div>
-
-                {/* Date/Time */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">
-                        📅 {t('วันที่และเวลา', 'Date and Time')}
-                    </label>
-                    <input
-                        type="datetime-local"
-                        value={formData.timestamp || ''}
-                        onChange={(e) => setFormData({ ...formData, timestamp: e.target.value })}
-                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
-                    />
-                </div>
-
-                {/* Account Selection */}
-                {
-                    accounts.length > 0 && (
+                ) : (
+                    // ==================== TRADE UI (Existing) ====================
+                    <>
+                        {/* Asset Type - 2 rows */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-2">📁 {t('บัญชี', 'Account')}</label>
-                            <select
-                                value={formData.account_id || ''}
-                                onChange={(e) => setFormData({ ...formData, account_id: e.target.value || undefined })}
-                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
-                            >
-                                <option value="">{t('ไม่ระบุบัญชี', 'No Account')}</option>
-                                {accounts.map((account) => (
-                                    <option key={account.id} value={account.id}>
-                                        {account.name}
-                                    </option>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">{t('ประเภทสินทรัพย์', 'Asset Type')}</label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {assetTypes.map((type) => (
+                                    <button
+                                        key={type}
+                                        type="button"
+                                        onClick={() => handleAssetTypeChange(type)}
+                                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${formData.asset_type === type
+                                            ? `${getAssetTypeColor(type)} text-white shadow-lg`
+                                            : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                                            }`}
+                                    >
+                                        {getAssetTypeName(type, settings.language)}
+                                    </button>
                                 ))}
-                            </select>
+                            </div>
                         </div>
-                    )
-                }
+
+                        {/* Market Selection */}
+                        {availableMarkets.length > 1 && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400 mb-2">{t('ตลาด/Exchange', 'Market/Exchange')}</label>
+                                <select
+                                    value={formData.market || ''}
+                                    onChange={(e) => handleMarketChange(e.target.value as Market)}
+                                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                                >
+                                    {availableMarkets.map((market) => {
+                                        const marketConfig = settings.markets.find(m => m.id === market);
+                                        const displayName = marketConfig
+                                            ? (settings.language === 'th' ? marketConfig.name : marketConfig.nameEn)
+                                            : getMarketName(market, settings.language);
+                                        return (
+                                            <option key={market} value={market}>
+                                                {displayName}
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+                        )}
+
+                        {/* Symbol (Moved to top) */}
+                        <div className="relative">
+                            <label className="block text-sm font-medium text-gray-400 mb-2">{t('สัญลักษณ์', 'Symbol')}</label>
+                            <input
+                                ref={symbolInputRef}
+                                type="text"
+                                value={formData.symbol}
+                                onChange={(e) => handleSymbolChange(e.target.value)}
+                                onFocus={() => {
+                                    if ((formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') && formData.symbol.length >= 1) {
+                                        fetchSymbolSuggestions(formData.symbol);
+                                    }
+                                }}
+                                placeholder={getSymbolPlaceholder()}
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                                autoComplete="off"
+                            />
+
+                            {/* Autocomplete Dropdown */}
+                            {showSuggestions && (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') && (
+                                <div
+                                    ref={suggestionsRef}
+                                    className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-60 overflow-y-auto"
+                                >
+                                    {isLoadingSuggestions ? (
+                                        <div className="px-4 py-3 text-gray-400 text-sm flex items-center gap-2">
+                                            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                            </svg>
+                                            {t('กำลังค้นหา...', 'Searching...')}
+                                        </div>
+                                    ) : symbolSuggestions.length > 0 ? (
+                                        symbolSuggestions.map((suggestion) => (
+                                            <button
+                                                key={suggestion.symbol}
+                                                type="button"
+                                                onClick={() => handleSelectSuggestion(suggestion)}
+                                                className="w-full px-4 py-2 text-left hover:bg-gray-700/50 transition-colors flex items-center justify-between group"
+                                            >
+                                                <div>
+                                                    <span className="text-white font-medium">{suggestion.symbol}</span>
+                                                    <span className="text-gray-400 text-sm ml-2">{suggestion.name}</span>
+                                                </div>
+                                                <span className="text-xs text-gray-500 group-hover:text-gray-400">
+                                                    {'market' in suggestion ? suggestion.market : ('contract_type' in suggestion ? (suggestion as TfexSymbol).contract_type : '')}
+                                                </span>
+                                            </button>
+                                        ))
+                                    ) : (
+                                        <div className="px-4 py-3 text-gray-400 text-sm">
+                                            {t('ไม่พบผลลัพธ์', 'No results found')}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Display selected symbol name */}
+                            {formData.symbol_name && (
+                                <div className="mt-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                                    <span className="text-emerald-400 text-sm">{formData.symbol_name}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* TFEX Contract Multiplier - Editable */}
+                        {formData.asset_type === 'tfex' && formData.symbol && (
+                            <div className="bg-amber-900/30 rounded-lg p-4 border border-amber-700/50">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <label className="block text-sm font-medium text-amber-300">{t('ตัวคูณสัญญา', 'Contract Multiplier')}</label>
+                                        <span className="text-xs text-amber-400/70">
+                                            {t('Auto:', 'Auto:')} {getTfexMultiplier(formData.symbol)}x
+                                            {formData.symbol.toUpperCase().startsWith('S50') && ' (THB/point)'}
+                                            {formData.symbol.toUpperCase().startsWith('GF') && ' (THB/0.1 baht)'}
+                                            {formData.symbol.toUpperCase().startsWith('GD') && ' (baht gold)'}
+                                            {formData.symbol.toUpperCase().startsWith('SV') && ' (THB/oz)'}
+                                            {formData.symbol.toUpperCase().startsWith('USD') && ' (USD)'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            value={leverageStr}
+                                            onChange={(e) => {
+                                                setLeverageStr(e.target.value);
+                                                const val = parseFloat(e.target.value);
+                                                setFormData(prev => ({ ...prev, leverage: isNaN(val) ? undefined : val }));
+                                            }}
+                                            className="w-24 px-3 py-2 text-lg font-bold bg-amber-800/50 border border-amber-600 rounded-lg text-amber-300 text-center focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                        />
+                                        <span className="text-amber-400 font-bold">x</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Initial Margin (Actual Money Used) - For Futures */}
+                        {(formData.asset_type === 'tfex' || (formData.asset_type === 'crypto' && isFuturesMode)) && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400 mb-2">{t('เงินหลักประกัน (Initial Margin)', 'Initial Margin')}</label>
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={initialMarginStr}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                            setInitialMarginStr(val);
+                                            const num = parseFloat(val);
+                                            if (!isNaN(num)) {
+                                                setFormData(prev => ({ ...prev, initial_margin: num }));
+                                            } else if (val === '') {
+                                                setFormData(prev => ({ ...prev, initial_margin: undefined }));
+                                            }
+                                        }
+                                    }}
+                                    placeholder={t('จำนวนเงินที่วางจริง (ไม่รวม Leverage)', 'Actual money used (excluding leverage)')}
+                                    className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                                />
+                            </div>
+                        )}
+
+                        {/* Crypto Futures Toggle */}
+                        {formData.asset_type === 'crypto' && (
+                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-white">{t('เทรด Futures', 'Futures Trading')}</label>
+                                        <span className="text-xs text-gray-400">{t('Long/Short พร้อมตัวคูณ', 'Long/Short with leverage')}</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setIsFuturesMode(!isFuturesMode);
+                                            // Reset action to buy when switching off futures mode
+                                            if (isFuturesMode) {
+                                                setFormData(prev => ({ ...prev, action: 'buy', leverage: undefined, initial_margin: undefined }));
+                                                setLeverageStr('');
+                                                setInitialMarginStr('');
+                                            } else {
+                                                setFormData(prev => ({ ...prev, action: 'long' }));
+                                            }
+                                        }}
+                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isFuturesMode ? 'bg-purple-600' : 'bg-gray-600'}`}
+                                    >
+                                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isFuturesMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                                    </button>
+                                </div>
+
+                                {/* Leverage Input */}
+                                {isFuturesMode && (
+                                    <div>
+                                        <label className="block text-xs text-gray-400 mb-2">{t('ตัวคูณ (Leverage)', 'Leverage')}</label>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            {[5, 10, 20, 50, 100].map((lev) => (
+                                                <button
+                                                    key={lev}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setLeverageStr(String(lev));
+                                                        setFormData(prev => ({ ...prev, leverage: lev }));
+                                                    }}
+                                                    className={`px-3 py-2 text-sm rounded-lg font-medium transition-all border ${Number(formData.leverage) === lev
+                                                        ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-500/25'
+                                                        : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600 hover:border-gray-500'
+                                                        }`}
+                                                >
+                                                    {lev}x
+                                                </button>
+                                            ))}
+                                            <input
+                                                type="number"
+                                                value={leverageStr}
+                                                onChange={(e) => {
+                                                    setLeverageStr(e.target.value);
+                                                    const val = parseFloat(e.target.value);
+                                                    setFormData(prev => ({ ...prev, leverage: isNaN(val) ? undefined : val }));
+                                                }}
+                                                placeholder={t('อื่นๆ', 'Custom')}
+                                                className={`w-24 px-3 py-2 text-base font-bold rounded-lg text-center transition-all outline-none border-2 ${
+                                                    // Highlight when custom value is active (not one of the presets)
+                                                    leverageStr && ![5, 10, 20, 50, 100].includes(Number(leverageStr))
+                                                        ? 'bg-purple-600/20 border-purple-500 text-purple-300 shadow-sm'
+                                                        : 'bg-gray-700 border-gray-600 text-white focus:border-purple-500'
+                                                    }`}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+
+
+                            </div>
+                        )}
+
+
+
+                        {/* Action */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">{t('ประเภทรายการ', 'Action')}</label>
+                            <div className={`grid gap-2 ${formData.asset_type === 'tfex' ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                                {getActionOptions().map((option) => (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => setFormData({ ...formData, action: option.value })}
+                                        className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${formData.action === option.value
+                                            ? (option.value === 'buy' || option.value === 'long' || option.value === 'deposit')
+                                                ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25'
+                                                : (option.value === 'sell' || option.value === 'short' || option.value === 'withdraw')
+                                                    ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/25'
+                                                    : (option.value === 'transfer')
+                                                        ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25'
+                                                        : (option.value === 'close_long')
+                                                            ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25'
+                                                            : (option.value === 'dividend')
+                                                                ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25'
+                                                                : 'bg-purple-500 text-white shadow-lg shadow-purple-500/25'
+                                            : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                                            }`}
+                                    >
+                                        {option.value === 'buy' ? '🛒 ' : option.value === 'sell' ? '💰 ' : option.value === 'long' ? '📈 ' : option.value === 'short' ? '📉 ' : option.value === 'close_long' ? '✅ ' : option.value === 'dividend' ? '🎁 ' : '🔄 '}
+                                        {option.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+
+
+                        {/* Quantity */}
+                        {/* Quantity / Amount Input - Hide for Dividend */}
+                        {formData.action !== 'dividend' && (
+                            <div>
+                                <div className="flex justify-between items-center mb-2">
+                                    <label className="block text-sm font-medium text-gray-400">
+                                        {inputMode === 'quantity' ? t('จำนวน', 'Quantity') : t('มูลค่ารวม (USDT)', 'Total Value (USDT)')}
+                                    </label>
+                                    {(formData.asset_type === 'crypto' || formData.asset_type === 'stock') && (
+                                        <div className="flex bg-gray-700/50 rounded-lg p-0.5 border border-gray-600/50">
+                                            <button
+                                                type="button"
+                                                onClick={() => setInputMode('quantity')}
+                                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'quantity' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                            >
+                                                Units
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setInputMode('total')}
+                                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${inputMode === 'total' ? 'bg-gray-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                            >
+                                                Total
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {inputMode === 'quantity' ? (
+                                    <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={quantityStr}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                                setQuantityStr(val);
+                                                const num = parseFloat(val);
+                                                if (!isNaN(num)) {
+                                                    setFormData(prev => ({ ...prev, quantity: num }));
+                                                    // Update order amount preview if price exists
+                                                    if (formData.price > 0) {
+                                                        setOrderAmountStr((num * formData.price).toFixed(2));
+                                                    }
+                                                } else if (val === '') {
+                                                    setFormData(prev => ({ ...prev, quantity: 0 }));
+                                                }
+                                            }
+                                        }}
+                                        placeholder="0.00000001"
+                                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                                    />
+                                ) : (
+                                    <div>
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                inputMode="decimal"
+                                                value={orderAmountStr}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                                        setOrderAmountStr(val);
+                                                        const amount = parseFloat(val);
+                                                        if (!isNaN(amount) && formData.price > 0) {
+                                                            const qty = amount / formData.price;
+                                                            setQuantityStr(qty.toFixed(8));
+                                                            setFormData(prev => ({ ...prev, quantity: qty }));
+                                                        }
+                                                    }
+                                                }}
+                                                placeholder="1000.00"
+                                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                                            />
+                                            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                                                <span className="text-gray-400 text-sm">USDT</span>
+                                            </div>
+                                        </div>
+                                        <div className="mt-1 text-xs text-gray-500 text-right">
+                                            ≈ {quantityStr || '0'} Units
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Unit Selector (Gold/Commodity) - Moved here */}
+                        {(formData.asset_type === 'gold' || formData.asset_type === 'commodity') && (
+                            <div className="mb-4 mt-2">
+                                <label className="block text-sm font-medium text-gray-400 mb-2">{t('หน่วย', 'Unit')}</label>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {[
+                                        { value: 'baht', label: t('บาท', 'Baht') },
+                                        { value: 'salung', label: t('สลึง', 'Salung') },
+                                        { value: 'oz', label: t('ออนซ์', 'Oz') },
+                                        { value: 'gram', label: t('กรัม', 'Gram') },
+                                        { value: 'kg', label: t('กิโลกรัม', 'Kg') },
+                                    ].map((unit) => (
+                                        <button
+                                            key={unit.value}
+                                            type="button"
+                                            onClick={() => setFormData({ ...formData, unit: unit.value })}
+                                            className={`px-2 py-2 rounded-lg text-sm font-medium transition-all ${formData.unit === unit.value
+                                                ? 'bg-amber-500 text-white shadow-lg'
+                                                : 'bg-gray-700/50 text-gray-300 hover:bg-gray-700'
+                                                }`}
+                                        >
+                                            {unit.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Price */}
+                        <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                    <label className="text-sm font-medium text-gray-400">
+                                        {formData.action === 'dividend' ? t('จำนวนเงินปันผล', 'Dividend Amount') : t('ราคา', 'Price')}
+                                    </label>
+                                    <select
+                                        value={formData.currency || 'THB'}
+                                        onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                                        className="px-2 py-1 bg-gray-700/50 border border-gray-600/50 rounded text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                    >
+                                        <option value="THB">THB</option>
+                                        <option value="USD">USD</option>
+                                        <option value="EUR">EUR</option>
+                                        <option value="GBP">GBP</option>
+                                        <option value="JPY">JPY</option>
+                                        <option value="HKD">HKD</option>
+                                        <option value="SGD">SGD</option>
+                                        <option value="BTC">BTC</option>
+                                        <option value="USDT">USDT</option>
+                                    </select>
+                                </div>
+                                <button
+                                    type="button"
+                                    disabled={!formData.symbol || isFetchingPrice}
+                                    onClick={fetchLatestPrice}
+                                    className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-500/20 hover:bg-blue-500/30 disabled:bg-gray-700/30 disabled:cursor-not-allowed border border-blue-500/30 disabled:border-gray-600/30 rounded-md text-blue-400 disabled:text-gray-500 transition-all"
+                                    title={t('ดึงราคาล่าสุด', 'Fetch Latest Price')}
+                                >
+                                    {isFetchingPrice ? (
+                                        <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                        </svg>
+                                    ) : (
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                    )}
+                                    {t('ดึงราคา', 'Fetch')}
+                                </button>
+                            </div>
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                value={priceStr}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '' || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                        setPriceStr(val);
+                                        const num = parseFloat(val);
+                                        if (!isNaN(num)) {
+                                            setFormData(prev => ({ ...prev, price: num }));
+                                        } else if (val === '') {
+                                            setFormData(prev => ({ ...prev, price: 0 }));
+                                        }
+                                    }
+                                }}
+                                placeholder="0.00"
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                            />
+                        </div>
+
+                        {/* Total Preview */}
+                        {formData.quantity > 0 && formData.price > 0 && (
+                            <div className="bg-gray-700/30 rounded-lg px-4 py-3">
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-gray-400">
+                                        {t('มูลค่ารวม', 'Total Value')}
+                                        {((formData.leverage || 0) > 1) && (
+                                            <span className="text-amber-400 ml-1">(×{formData.leverage})</span>
+                                        )}
+                                    </span>
+                                    <span className="text-white font-semibold font-mono">
+                                        {formData.currency} {((formData.quantity * formData.price) * (formData.leverage || 1)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Fees */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">
+                                {t('ค่าธรรมเนียม', 'Fees')} ({formData.currency || 'THB'})
+                            </label>
+                            <input
+                                type="number"
+                                step="any"
+                                value={formData.fees || ''}
+                                onChange={(e) => setFormData({ ...formData, fees: parseFloat(e.target.value) || 0 })}
+                                placeholder="0.00"
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all font-mono"
+                            />
+                        </div>
+
+                        {/* Date/Time */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-2">
+                                📅 {t('วันที่และเวลา', 'Date and Time')}
+                            </label>
+                            <input
+                                type="datetime-local"
+                                value={formData.timestamp || ''}
+                                onChange={(e) => setFormData({ ...formData, timestamp: e.target.value })}
+                                className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                            />
+                        </div>
+
+                        {/* Account Selection */}
+                        {
+                            accounts.length > 0 && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-400 mb-2">📁 {t('บัญชี', 'Account')}</label>
+                                    <select
+                                        value={formData.account_id || ''}
+                                        onChange={(e) => setFormData({ ...formData, account_id: e.target.value || undefined })}
+                                        className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600/50 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                                    >
+                                        <option value="">{t('ไม่ระบุบัญชี', 'No Account')}</option>
+                                        {accounts.map((account) => (
+                                            <option key={account.id} value={account.id}>
+                                                {account.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )
+                        }
+                    </>
+                )}
 
                 {/* Tags */}
                 <div>

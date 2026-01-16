@@ -352,6 +352,7 @@ export function getMarketName(market: Market, language: string = 'th'): string {
         // Commodities
         comex: { th: 'COMEX', en: 'COMEX' },
         lbma: { th: 'LBMA (London)', en: 'LBMA (London)' },
+        local: { th: 'ภายในประเทศ', en: 'Local' },
         other: { th: 'อื่นๆ', en: 'Other' },
     };
     const nameObj = names[market];

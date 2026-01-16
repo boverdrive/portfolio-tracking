@@ -60,8 +60,8 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
     return (
         <div className="space-y-3">
             {transactions.map((tx, index) => {
-                // Check if it's a "positive" action (buy/long/dividend) or "negative" action (sell/short/close)
-                const isPositive = tx.action === 'buy' || tx.action === 'long' || tx.action === 'dividend';
+                // Check if it's a "positive" action (buy/long/dividend/deposit) or "negative" action (sell/short/close/withdraw)
+                const isPositive = tx.action === 'buy' || tx.action === 'long' || tx.action === 'dividend' || tx.action === 'deposit';
                 // For TFEX, leverage = contract multiplier (affects value). For Crypto, it's just financial leverage.
                 const valueMultiplier = (tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
                 const displayLeverage = tx.leverage || 1;
@@ -132,6 +132,8 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                         case 'close_long': return { label: t('ปิด Long', 'Close Long'), color: 'bg-amber-500/20 text-amber-400' };
                         case 'close_short': return { label: t('ปิด Short', 'Close Short'), color: 'bg-purple-500/20 text-purple-400' };
                         case 'dividend': return { label: t('รับปันผล', 'Dividend'), color: 'bg-amber-500/20 text-amber-400' };
+                        case 'deposit': return { label: t('ฝาก', 'Deposit'), color: 'bg-emerald-500/20 text-emerald-400' };
+                        case 'withdraw': return { label: t('ถอน', 'Withdraw'), color: 'bg-rose-500/20 text-rose-400' };
                         default: return { label: tx.action, color: 'bg-gray-500/20 text-gray-400' };
                     }
                 };

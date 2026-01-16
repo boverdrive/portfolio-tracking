@@ -31,8 +31,22 @@ services:
       # Credentials to connect to PocketBase
       - POCKETBASE_ADMIN_EMAIL=${POCKETBASE_ADMIN_EMAIL}
       - POCKETBASE_ADMIN_PASSWORD=${POCKETBASE_ADMIN_PASSWORD}
+      - YAHOO_FINANCE_SERVICE_URL=http://yahoo-finance:8000
     depends_on:
       - pocketbase
+      - yahoo-finance
+
+  # Yahoo Finance Service (Python Microservice)
+  yahoo-finance:
+    build:
+      context: ./yahoo-finance
+      dockerfile: Dockerfile
+    container_name: portfolio-yahoo-finance
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - PROXY_URL=${PROXY_URL}
 
   # Frontend Service (Next.js)
   frontend:

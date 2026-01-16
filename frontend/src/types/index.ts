@@ -34,7 +34,7 @@ export interface AuthProvidersResponse {
 // Asset types
 export type AssetType = 'stock' | 'tfex' | 'crypto' | 'foreign_stock' | 'gold' | 'commodity';
 
-export type TradeAction = 'buy' | 'sell' | 'long' | 'short' | 'close_long' | 'close_short' | 'dividend';
+export type TradeAction = 'buy' | 'sell' | 'long' | 'short' | 'close_long' | 'close_short' | 'dividend' | 'deposit' | 'withdraw' | 'transfer';
 
 // Market/Exchange types
 export type Market =
@@ -51,7 +51,7 @@ export type Market =
   // Commodities
   | 'comex' | 'lbma'
   // Other
-  | 'other';
+  | 'other' | 'local';
 
 // Transaction model
 export interface Transaction {

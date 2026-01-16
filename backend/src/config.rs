@@ -7,6 +7,7 @@ pub struct Config {
     pub pocketbase_url: String,
     pub coingecko_api_url: String,
     pub settrade_api_url: String,
+    pub yahoo_finance_service_url: String,
     pub price_cache_ttl_seconds: u64,
     // OAuth configuration
     pub oauth_enabled: bool,
@@ -50,6 +51,8 @@ impl Config {
                 .unwrap_or_else(|_| "https://api.coingecko.com/api/v3".to_string()),
             settrade_api_url: env::var("SETTRADE_API_URL")
                 .unwrap_or_else(|_| "https://open-api.settrade.com/api".to_string()),
+            yahoo_finance_service_url: env::var("YAHOO_FINANCE_SERVICE_URL")
+                .unwrap_or_else(|_| "http://yahoo-finance:8000".to_string()),
             price_cache_ttl_seconds: env::var("PRICE_CACHE_TTL")
                 .unwrap_or_else(|_| "60".to_string())
                 .parse()
