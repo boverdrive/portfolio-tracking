@@ -147,6 +147,13 @@ If you want to populate your PocketBase with initial data (e.g., default assets,
    ```
    *Note: Ensure your PocketBase is running at `http://127.0.0.1:8090` or set `POCKETBASE_URL` environment variable.*
 
+   **Running via Docker Compose:**
+   If you don't have Node.js installed on your host, you can run the script using the frontend container:
+   ```bash
+   docker compose run --rm -v $(pwd)/scripts:/scripts -e POCKETBASE_URL=http://pocketbase:8090 --entrypoint node frontend /scripts/seed.js
+   ```
+
+
 
 ---
 
