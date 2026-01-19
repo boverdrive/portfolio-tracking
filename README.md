@@ -129,7 +129,24 @@ If you want to run services individually without Docker (except PocketBase which
 #### Frontend
 1. `cd frontend`
 2. `npm install`
+
 3. `npm run dev`
+
+### 3. Database Seeding (Optional)
+
+If you want to populate your PocketBase with initial data (e.g., default assets, categories):
+
+1. **Generate Seed Data** (Back up existing data):
+   ```bash
+   node scripts/generate-seed.js
+   ```
+
+2. **Run Seed Script** (Restore/Populate data):
+   ```bash
+   node scripts/seed.js
+   ```
+   *Note: Ensure your PocketBase is running at `http://127.0.0.1:8090` or set `POCKETBASE_URL` environment variable.*
+
 
 ---
 

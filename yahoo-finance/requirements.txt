@@ -1,0 +1,7 @@
+fastapi>=0.109.0
+uvicorn>=0.27.0
+yfinance==0.2.62
+requests>=2.31.0
+pandas>=2.0.0
+# mcp is required because helper.py likely imports it or logic depends on it
+mcp>=1.9.3
