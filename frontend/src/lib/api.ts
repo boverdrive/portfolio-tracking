@@ -22,7 +22,7 @@ declare global {
     }
 }
 
-const getApiBaseUrl = () => {
+export const getApiBaseUrl = () => {
     if (typeof window === 'undefined') {
         return process.env.INTERNAL_API_URL || 'http://localhost:3001';
     }

@@ -4,7 +4,10 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { useRouter } from 'next/navigation';
 import { User, AuthProvidersResponse, LinkedProvider } from '@/types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { getApiBaseUrl } from '@/lib/api';
+
+// Removed hardcoded API_BASE_URL constant to allow lazy evaluation
+
 
 interface AuthContextType {
     user: User | null;
@@ -38,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Fetch available auth providers
     const fetchProviders = useCallback(async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/providers`);
+            const response = await fetch(`${getApiBaseUrl()}/api/auth/providers`);
             if (response.ok) {
                 const data = await response.json();
                 setProviders(data);
@@ -55,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Verify token and get user
     const verifyToken = useCallback(async (token: string) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/verify`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/auth/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token }),
@@ -95,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!token) return;
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/linked-providers`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/auth/linked-providers`, {
                 headers: {
                     'Cookie': `auth_token=${token}`,
                 },
@@ -112,13 +115,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Login with OAuth provider
     const login = useCallback((provider: 'google' | 'oidc') => {
-        window.location.href = `${API_BASE_URL}/api/auth/${provider}`;
+        window.location.href = `${getApiBaseUrl()}/api/auth/${provider}`;
     }, []);
 
     // Local login with email/password
     const localLogin = useCallback(async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/local/login`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/auth/local/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password }),
@@ -143,7 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Local register with email/password
     const localRegister = useCallback(async (email: string, password: string, name?: string): Promise<{ success: boolean; error?: string }> => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/local/register`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/auth/local/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password, name }),
@@ -168,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Logout
     const logout = useCallback(async () => {
         try {
-            await fetch(`${API_BASE_URL}/api/auth/logout`, {
+            await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
                 method: 'POST',
                 credentials: 'include',
             });
@@ -190,7 +193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!token) return;
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/auth/unlink/${provider}`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/auth/unlink/${provider}`, {
                 method: 'DELETE',
                 headers: {
                     'Cookie': `auth_token=${token}`,
@@ -208,7 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Logout from all devices
     const logoutAll = useCallback(async () => {
         try {
-            await fetch(`${API_BASE_URL}/api/auth/logout-all`, {
+            await fetch(`${getApiBaseUrl()}/api/auth/logout-all`, {
                 method: 'POST',
                 credentials: 'include',
             });
@@ -227,7 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const changePassword = useCallback(async (oldPassword: string, newPassword: string) => {
         try {
             const token = localStorage.getItem(TOKEN_KEY);
-            const response = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/auth/change-password`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
