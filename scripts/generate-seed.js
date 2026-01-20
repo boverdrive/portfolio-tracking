@@ -1,7 +1,49 @@
 const fs = require('fs');
 const path = require('path');
 
+// Load .env file from project root
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
 const PB_URL = process.env.POCKETBASE_URL || 'http://127.0.0.1:8090';
+const PB_ADMIN_EMAIL = process.env.POCKETBASE_ADMIN_EMAIL;
+const PB_ADMIN_PASSWORD = process.env.POCKETBASE_ADMIN_PASSWORD;
+
+let authToken = null;
+
+// Authenticate as admin to access all collections
+async function authenticate() {
+    if (!PB_ADMIN_EMAIL || !PB_ADMIN_PASSWORD) {
+        console.warn('⚠️ No admin credentials provided. Some collections may not be accessible.');
+        console.warn('   Set POCKETBASE_ADMIN_EMAIL and POCKETBASE_ADMIN_PASSWORD in .env');
+        return null;
+    }
+
+    try {
+        console.log('🔐 Authenticating as admin (PocketBase v0.35+)...');
+        // PocketBase v0.35+ uses _superusers collection instead of /api/admins
+        const resp = await fetch(`${PB_URL}/api/collections/_superusers/auth-with-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                identity: PB_ADMIN_EMAIL,
+                password: PB_ADMIN_PASSWORD
+            })
+        });
+
+        if (!resp.ok) {
+            const error = await resp.text();
+            throw new Error(`Auth failed: ${error}`);
+        }
+
+        const data = await resp.json();
+        authToken = data.token;
+        console.log('   ✅ Authenticated successfully');
+        return authToken;
+    } catch (err) {
+        console.error('❌ Authentication failed:', err.message);
+        return null;
+    }
+}
 
 // Configuration: Which collections to export
 const COLLECTIONS_TO_EXPORT = [
@@ -28,7 +70,11 @@ async function fetchCollection(collectionName) {
 
     while (true) {
         try {
-            const resp = await fetch(`${PB_URL}/api/collections/${collectionName}/records?page=${page}&perPage=500`);
+            const headers = {};
+            if (authToken) {
+                headers['Authorization'] = authToken;
+            }
+            const resp = await fetch(`${PB_URL}/api/collections/${collectionName}/records?page=${page}&perPage=500`, { headers });
             if (!resp.ok) {
                 if (resp.status === 404) {
                     console.warn(`⚠️ Collection ${collectionName} not found or empty (404)`);
@@ -79,7 +125,10 @@ function cleanRecord(record, collectionName) {
 }
 
 async function main() {
-    console.log('🔄 generating seed data from:', PB_URL);
+    console.log('🔄 Generating seed data from:', PB_URL);
+
+    // Authenticate first
+    await authenticate();
 
     const seedData = {};
 

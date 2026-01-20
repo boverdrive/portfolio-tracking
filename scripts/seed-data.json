@@ -1,0 +1,551 @@
+{
+  "api_providers": [
+    {
+      "api_url": "",
+      "enabled": true,
+      "id": "x3xn4bqb5hhptnu",
+      "market_id": "binance",
+      "priority": 1,
+      "provider_name": "CoinGecko",
+      "provider_type": "coingecko",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://www.set.or.th",
+      "enabled": true,
+      "id": "88o7iwrfc0xixi6",
+      "market_id": "thai_stock",
+      "priority": 1,
+      "provider_name": "SET Market Data",
+      "provider_type": "set_marketdata",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://query1.finance.yahoo.com",
+      "enabled": true,
+      "id": "bk5zf0oy7zqbwi3",
+      "market_id": "us_stock",
+      "priority": 1,
+      "provider_name": "Yahoo Finance",
+      "provider_type": "yahoo_finance",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://api.binance.com",
+      "enabled": true,
+      "id": "3osrt1q7otexn0v",
+      "market_id": "crypto",
+      "priority": 1,
+      "provider_name": "Binance",
+      "provider_type": "binance",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://api.coingecko.com",
+      "enabled": true,
+      "id": "6x0dhthsjvsqx0l",
+      "market_id": "crypto",
+      "priority": 2,
+      "provider_name": "CoinGecko",
+      "provider_type": "coingecko",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://api.bitkub.com",
+      "enabled": true,
+      "id": "dujlbndo9jabm8r",
+      "market_id": "crypto",
+      "priority": 3,
+      "provider_name": "Bitkub",
+      "provider_type": "bitkub",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://www.okx.com",
+      "enabled": true,
+      "id": "ho3xrjppf1v6816",
+      "market_id": "crypto",
+      "priority": 4,
+      "provider_name": "OKX",
+      "provider_type": "okx",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://api.kucoin.com",
+      "enabled": true,
+      "id": "db7tunc1i6zi259",
+      "market_id": "crypto",
+      "priority": 5,
+      "provider_name": "KuCoin",
+      "provider_type": "kucoin",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://api.htx.com",
+      "enabled": true,
+      "id": "kt63l5vjkz15qok",
+      "market_id": "crypto",
+      "priority": 6,
+      "provider_name": "HTX",
+      "provider_type": "htx",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://www.goldtraders.or.th",
+      "enabled": true,
+      "id": "db6dd6tkaeuz049",
+      "market_id": "gold",
+      "priority": 1,
+      "provider_name": "Thai Gold Traders",
+      "provider_type": "goldtraders",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://www.goldapi.io",
+      "enabled": true,
+      "id": "3tx4oirevhtxsfq",
+      "market_id": "gold",
+      "priority": 2,
+      "provider_name": "Gold API",
+      "provider_type": "goldapi",
+      "timeout_ms": 10000
+    },
+    {
+      "api_url": "https://query1.finance.yahoo.com",
+      "enabled": true,
+      "id": "0gbt5uxw6hypdwb",
+      "market_id": "tfex",
+      "priority": 1,
+      "provider_name": "Yahoo Finance (Futures)",
+      "provider_type": "yahoo_finance",
+      "timeout_ms": 10000
+    }
+  ],
+  "jobs": [
+    {
+      "enabled": true,
+      "id": "ew05cmtw1iber2p",
+      "interval_seconds": 86400,
+      "job_type": "api_status_check",
+      "last_result": {
+        "offline_count": 3,
+        "online_count": 4,
+        "results": [
+          {
+            "error_message": "error sending request for url (https://marketdata.set.or.th/)",
+            "market_id": "set",
+            "market_name": "ตลาดหลักทรัพย์",
+            "response_time_ms": null,
+            "status": "offline",
+            "url": "https://marketdata.set.or.th"
+          },
+          {
+            "error_message": "HTTP 429 Too Many Requests",
+            "market_id": "nyse",
+            "market_name": "NYSE",
+            "response_time_ms": 174,
+            "status": "offline",
+            "url": "https://query1.finance.yahoo.com"
+          },
+          {
+            "error_message": "HTTP 429 Too Many Requests",
+            "market_id": "nasdaq",
+            "market_name": "NASDAQ",
+            "response_time_ms": 42,
+            "status": "offline",
+            "url": "https://query1.finance.yahoo.com"
+          },
+          {
+            "error_message": null,
+            "market_id": "binance",
+            "market_name": "Binance",
+            "response_time_ms": 75,
+            "status": "online",
+            "url": "https://api.coingecko.com"
+          },
+          {
+            "error_message": null,
+            "market_id": "bitkub",
+            "market_name": "Bitkub",
+            "response_time_ms": 229,
+            "status": "online",
+            "url": "https://api.bitkub.com"
+          },
+          {
+            "error_message": null,
+            "market_id": "goldapi",
+            "market_name": "Gold API",
+            "response_time_ms": 1460,
+            "status": "online",
+            "url": "https://www.goldapi.io"
+          },
+          {
+            "error_message": null,
+            "market_id": "goldtraders",
+            "market_name": "Thai Gold",
+            "response_time_ms": 248,
+            "status": "online",
+            "url": "https://www.goldtraders.or.th"
+          }
+        ],
+        "total_checked": 7
+      },
+      "last_run": "2026-01-16 16:42:15.797Z",
+      "name": "ตรวจสอบสถานะ API",
+      "name_en": "API Status Check",
+      "next_run": "2026-01-17 16:42:15.797Z",
+      "schedule_times": null,
+      "status": "success"
+    },
+    {
+      "enabled": true,
+      "id": "43g0upbomlt8diz",
+      "interval_seconds": 86400,
+      "job_type": "price_fetch",
+      "last_result": {
+        "errors": 7,
+        "fetched": 4,
+        "last_updated": "2026-01-16T16:42:11.355250+00:00",
+        "total_symbols": 11
+      },
+      "last_run": "2026-01-16 16:42:12.281Z",
+      "name": "ดึงราคาประจำวัน",
+      "name_en": "Daily Price Fetch",
+      "next_run": "2026-01-17 16:42:12.281Z",
+      "schedule_times": null,
+      "status": "success"
+    },
+    {
+      "enabled": true,
+      "id": "aabyhfsfkg6rd68",
+      "interval_seconds": 86400,
+      "job_type": "portfolio_snapshot",
+      "last_result": {
+        "date": "2026-01-16",
+        "errors": 0,
+        "snapshots_created": 2,
+        "snapshots_updated": 2,
+        "users_processed": 4
+      },
+      "last_run": "2026-01-16 16:42:16.525Z",
+      "name": "บันทึก Portfolio Snapshot",
+      "name_en": "Portfolio Snapshot",
+      "next_run": "2026-01-17 16:42:16.525Z",
+      "schedule_times": null,
+      "status": "success"
+    },
+    {
+      "enabled": true,
+      "id": "gccmxtk2mol5a00",
+      "interval_seconds": 60,
+      "job_type": "price_history_log",
+      "last_result": {
+        "errors": 6,
+        "recorded": 8,
+        "timestamp": "2026-01-16T17:00:32.592841+00:00"
+      },
+      "last_run": "2026-01-16 17:00:34.690Z",
+      "name": "Daily Price History",
+      "name_en": "Daily Price History",
+      "next_run": "2026-01-16 17:01:34.690Z",
+      "schedule_times": [
+        "07:00",
+        "17:00",
+        "21:00"
+      ],
+      "status": "success"
+    }
+  ],
+  "api_rate_limits": [
+    {
+      "api_name": "coingecko",
+      "blocked_until": "2026-01-09 05:50:47.299Z",
+      "current_day_count": 7,
+      "current_minute_count": 2,
+      "day_reset_at": "2026-01-16 10:35:03.177Z",
+      "id": "xmpbxp734y1wzte",
+      "is_blocked": true,
+      "last_request_at": "2026-01-15 21:58:08.249Z",
+      "minute_reset_at": "2026-01-15 21:59:07.792Z",
+      "requests_per_day": 10000,
+      "requests_per_minute": 10
+    },
+    {
+      "api_name": "bitkub",
+      "blocked_until": "",
+      "current_day_count": 142,
+      "current_minute_count": 1,
+      "day_reset_at": "2026-01-17 11:32:37.228Z",
+      "id": "b04a5twf2qifg6w",
+      "is_blocked": false,
+      "last_request_at": "2026-01-17 06:34:21.648Z",
+      "minute_reset_at": "2026-01-17 06:35:20.952Z",
+      "requests_per_day": 0,
+      "requests_per_minute": 100
+    },
+    {
+      "api_name": "binance",
+      "blocked_until": "",
+      "current_day_count": 145,
+      "current_minute_count": 1,
+      "day_reset_at": "2026-01-17 11:31:59.920Z",
+      "id": "eeydvcw65a4dhqx",
+      "is_blocked": false,
+      "last_request_at": "2026-01-17 06:34:22.752Z",
+      "minute_reset_at": "2026-01-17 06:35:21.711Z",
+      "requests_per_day": 0,
+      "requests_per_minute": 120
+    },
+    {
+      "api_name": "okx",
+      "blocked_until": "",
+      "current_day_count": 146,
+      "current_minute_count": 1,
+      "day_reset_at": "2026-01-17 11:31:59.369Z",
+      "id": "8ny2rhbilvzd0iz",
+      "is_blocked": false,
+      "last_request_at": "2026-01-17 06:34:20.919Z",
+      "minute_reset_at": "2026-01-17 06:35:20.592Z",
+      "requests_per_day": 0,
+      "requests_per_minute": 60
+    },
+    {
+      "api_name": "yahoo_finance",
+      "blocked_until": "",
+      "current_day_count": 20,
+      "current_minute_count": 5,
+      "day_reset_at": "2026-01-17 11:31:59.500Z",
+      "id": "3v4lwcibuarwk9a",
+      "is_blocked": false,
+      "last_request_at": "2026-01-16 17:00:34.213Z",
+      "minute_reset_at": "2026-01-16 17:01:32.593Z",
+      "requests_per_day": 2000,
+      "requests_per_minute": 60
+    },
+    {
+      "api_name": "kucoin",
+      "blocked_until": "",
+      "current_day_count": 0,
+      "current_minute_count": 0,
+      "day_reset_at": "",
+      "id": "rang33074ws157g",
+      "is_blocked": false,
+      "last_request_at": "",
+      "minute_reset_at": "",
+      "requests_per_day": 0,
+      "requests_per_minute": 100
+    },
+    {
+      "api_name": "htx",
+      "blocked_until": "",
+      "current_day_count": 0,
+      "current_minute_count": 0,
+      "day_reset_at": "",
+      "id": "12lo3k3l24xtdrx",
+      "is_blocked": false,
+      "last_request_at": "",
+      "minute_reset_at": "",
+      "requests_per_day": 0,
+      "requests_per_minute": 100
+    },
+    {
+      "api_name": "thaigold",
+      "blocked_until": "",
+      "current_day_count": 160,
+      "current_minute_count": 1,
+      "day_reset_at": "2026-01-17 11:31:59.208Z",
+      "id": "qbiym668cdzargl",
+      "is_blocked": false,
+      "last_request_at": "2026-01-17 06:34:23.299Z",
+      "minute_reset_at": "2026-01-17 06:35:22.875Z",
+      "requests_per_day": 0,
+      "requests_per_minute": 60
+    }
+  ],
+  "symbols": [
+    {
+      "asset_type": "stock",
+      "category": "Insurance",
+      "icon_url": "",
+      "id": "z1a1qoaupaoy58d",
+      "market": "set",
+      "name": "ทิพยประกันภัย / Dhipaya Group Holdings",
+      "sector": "Financials",
+      "symbol": "TIPH"
+    }
+  ],
+  "asset_prices": [
+    {
+      "asset_type": "stock",
+      "currency": "THB",
+      "id": "jy5qd1ydp4thw1c",
+      "last_updated": "2026-01-15T11:31:28.726521+00:00",
+      "market": "set",
+      "price": 20.2,
+      "symbol": "TIPH"
+    },
+    {
+      "asset_type": "stock",
+      "currency": "THB",
+      "id": "q3xtq0ov400x27n",
+      "last_updated": "2026-01-15T11:31:28.726521+00:00",
+      "market": "set",
+      "price": 21.6,
+      "symbol": "CPF"
+    },
+    {
+      "asset_type": "stock",
+      "currency": "THB",
+      "id": "p98fc04bv0f1kty",
+      "last_updated": "2026-01-15T11:31:28.726521+00:00",
+      "market": "set",
+      "price": 12.6,
+      "symbol": "STA"
+    },
+    {
+      "asset_type": "tfex",
+      "currency": "THB",
+      "id": "77gvxcdpia2cxyh",
+      "last_updated": "2026-01-16T16:42:11.355250+00:00",
+      "market": "tfex",
+      "price": 928,
+      "symbol": "S50H26"
+    },
+    {
+      "asset_type": "foreign_stock",
+      "currency": "USD",
+      "id": "zq5d0x5x730robe",
+      "last_updated": "2026-01-15T11:31:28.726521+00:00",
+      "market": "nyse",
+      "price": 318.88,
+      "symbol": "GE"
+    },
+    {
+      "asset_type": "crypto",
+      "currency": "USDT",
+      "id": "r2hvevlbv7ub3gj",
+      "last_updated": "2026-01-09T12:16:52.992753+00:00",
+      "market": "binance",
+      "price": 90619.49,
+      "symbol": "BTC"
+    },
+    {
+      "asset_type": "stock",
+      "currency": "THB",
+      "id": "smq790ws5ypcpzc",
+      "last_updated": "2026-01-15T11:31:28.726521+00:00",
+      "market": "set",
+      "price": 32.75,
+      "symbol": "PTT"
+    },
+    {
+      "asset_type": "tfex",
+      "currency": "THB",
+      "id": "5k4yiu0o7blg9ef",
+      "last_updated": "2026-01-16T16:42:11.355250+00:00",
+      "market": "tfex",
+      "price": 100,
+      "symbol": "SVFH26"
+    },
+    {
+      "asset_type": "crypto",
+      "currency": "USD",
+      "id": "0hyjrar6p919tif",
+      "last_updated": "2026-01-16T16:42:11.355250+00:00",
+      "market": "binance",
+      "price": 89.32,
+      "symbol": "XAG"
+    },
+    {
+      "asset_type": "crypto",
+      "currency": "USDT",
+      "id": "rf00lvfs1ps3lvg",
+      "last_updated": "2026-01-16T16:42:11.355250+00:00",
+      "market": "okx",
+      "price": 94915.6,
+      "symbol": "BTC"
+    },
+    {
+      "asset_type": "stock",
+      "currency": "THB",
+      "id": "a68ectmfz0bao2q",
+      "last_updated": "2026-01-15T11:31:28.726521+00:00",
+      "market": "set",
+      "price": 2.02,
+      "symbol": "TTB"
+    },
+    {
+      "asset_type": "gold",
+      "currency": "THB",
+      "id": "n6riq8e23hgzmni",
+      "last_updated": "",
+      "market": "comex",
+      "price": 67850,
+      "symbol": "GOLD96.5"
+    },
+    {
+      "asset_type": "gold",
+      "currency": "THB",
+      "id": "ql37kjwyek24lol",
+      "last_updated": "2026-01-16T11:31:59.208773+00:00",
+      "market": "local",
+      "price": 68300,
+      "symbol": "GOLD96.5"
+    },
+    {
+      "asset_type": "commodity",
+      "currency": "USD",
+      "id": "ph1235lesdjg23d",
+      "last_updated": "",
+      "market": "comex",
+      "price": 85.405,
+      "symbol": "XAG"
+    }
+  ],
+  "users": [
+    {
+      "avatar_url": "",
+      "email": "bmaximum@gmail.com",
+      "id": "u4uekcv466xymf2",
+      "local_password_hash": "$2b$12$mxRPKkfkgHo963Z1vO62LOCyiWBLnqb1NP3pzolZp5sgFqVNQAAlC",
+      "name": "bird",
+      "role": "user",
+      "token_version": 1,
+      "password": "password123",
+      "passwordConfirm": "password123"
+    },
+    {
+      "avatar_url": "",
+      "email": "test@example.com",
+      "id": "29o0380puxppqiz",
+      "local_password_hash": "",
+      "name": "Test User",
+      "role": "user",
+      "token_version": 0,
+      "password": "password123",
+      "passwordConfirm": "password123"
+    },
+    {
+      "avatar_url": "",
+      "email": "padettaweekunkan@gmail.com",
+      "id": "9wtro58orys1w6p",
+      "local_password_hash": "$2b$12$InJs.vD9fZ8np./T6GgrnOTjjr1GFOFS.BD3zgM2sUbwE1Va4GlDq",
+      "name": "Admin",
+      "role": "admin",
+      "token_version": 0,
+      "password": "password123",
+      "passwordConfirm": "password123"
+    },
+    {
+      "avatar_url": "",
+      "email": "admin@portfolio.local",
+      "id": "9dumvucag41so5q",
+      "local_password_hash": "$2b$12$6jL2vHzRO7NQi20hsv/dluX7s7ZZEhRSspHRtj2j38Rd9o15wLcnG",
+      "name": "Admin",
+      "role": "admin",
+      "token_version": 1,
+      "password": "password123",
+      "passwordConfirm": "password123"
+    }
+  ]
+}

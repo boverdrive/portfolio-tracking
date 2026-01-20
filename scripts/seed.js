@@ -1,7 +1,58 @@
 const fs = require('fs');
 const path = require('path');
 
+// Load .env file from project root
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
 const PB_URL = process.env.POCKETBASE_URL || 'http://127.0.0.1:8090';
+const PB_ADMIN_EMAIL = process.env.POCKETBASE_ADMIN_EMAIL;
+const PB_ADMIN_PASSWORD = process.env.POCKETBASE_ADMIN_PASSWORD;
+
+let authToken = null;
+
+// Authenticate as admin to create records in protected collections
+async function authenticate() {
+    if (!PB_ADMIN_EMAIL || !PB_ADMIN_PASSWORD) {
+        console.warn('⚠️ No admin credentials provided. Some collections may not be accessible.');
+        console.warn('   Set POCKETBASE_ADMIN_EMAIL and POCKETBASE_ADMIN_PASSWORD in .env');
+        return null;
+    }
+
+    try {
+        console.log('🔐 Authenticating as admin (PocketBase v0.35+)...');
+        // PocketBase v0.35+ uses _superusers collection instead of /api/admins
+        const resp = await fetch(`${PB_URL}/api/collections/_superusers/auth-with-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                identity: PB_ADMIN_EMAIL,
+                password: PB_ADMIN_PASSWORD
+            })
+        });
+
+        if (!resp.ok) {
+            const error = await resp.text();
+            throw new Error(`Auth failed: ${error}`);
+        }
+
+        const data = await resp.json();
+        authToken = data.token;
+        console.log('   ✅ Authenticated successfully');
+        return authToken;
+    } catch (err) {
+        console.error('❌ Authentication failed:', err.message);
+        return null;
+    }
+}
+
+// Helper to get headers with auth token
+function getHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) {
+        headers['Authorization'] = authToken;
+    }
+    return headers;
+}
 
 // Order matters for dependencies: users -> providers -> symbols -> prices
 const COLLECTION_ORDER = [
@@ -16,6 +67,9 @@ const COLLECTION_ORDER = [
 async function seed() {
     console.log('🌱 Starting Seed Process (from seed-data.json)...');
     console.log('Target:', PB_URL);
+
+    // Authenticate first
+    await authenticate();
 
     const seedFilePath = path.join(__dirname, 'seed-data.json');
     if (!fs.existsSync(seedFilePath)) {
@@ -57,7 +111,9 @@ async function seed() {
                 }
 
                 if (filter) {
-                    const existing = await fetch(`${PB_URL}/api/collections/${collectionName}/records?filter=(${filter})`);
+                    const existing = await fetch(`${PB_URL}/api/collections/${collectionName}/records?filter=(${filter})`, {
+                        headers: getHeaders()
+                    });
                     const json = await existing.json();
                     if (json.items && json.items.length > 0) {
                         skippedCount++;
@@ -69,7 +125,7 @@ async function seed() {
                 // Create record
                 const res = await fetch(`${PB_URL}/api/collections/${collectionName}/records`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getHeaders(),
                     body: JSON.stringify(record)
                 });
 
