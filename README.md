@@ -138,7 +138,15 @@ If you are deploying this to a server or want to access it from another device o
     ```
     *(Note: No rebuild is required if you are using the latest generic image)*
 
-### 2. Manual Setup (Local Development)
+### 3. deploying Updates (Multi-Arch)
+
+To build and push updates for all services (Backend, Frontend, Yahoo Finance) supporting both **Apple Silicon (ARM64)** and **Intel/AMD (AMD64)** servers, run:
+
+```bash
+./scripts/push-images.sh
+```
+
+This script uses `docker buildx` to ensure your images work on any server.
 
 If you want to run services individually without Docker (except PocketBase which is recommended to run separately or via the binary).
 
