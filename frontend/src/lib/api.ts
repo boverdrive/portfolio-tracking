@@ -13,6 +13,7 @@ import {
 } from '@/types';
 
 // Define the global window interface to include __ENV
+// Define the global window interface to include __ENV
 declare global {
     interface Window {
         __ENV?: {
@@ -21,9 +22,13 @@ declare global {
     }
 }
 
-const API_BASE_URL = typeof window === 'undefined'
-    ? (process.env.INTERNAL_API_URL || 'http://localhost:3001')
-    : (window.__ENV?.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001');
+const getApiBaseUrl = () => {
+    if (typeof window === 'undefined') {
+        return process.env.INTERNAL_API_URL || 'http://localhost:3001';
+    }
+    return window.__ENV?.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+};
+
 const TOKEN_KEY = 'auth_token';
 
 // Get auth token from localStorage
@@ -49,7 +54,7 @@ async function fetchApi<T>(
         headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
         headers,
         ...options,
     });
