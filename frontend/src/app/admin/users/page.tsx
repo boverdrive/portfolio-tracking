@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { User } from '@/types';
 import Header from '@/components/Header';
+import { getApiBaseUrl } from '@/lib/api';
 
 interface AdminUser extends User {
     id: string;
@@ -35,12 +36,12 @@ export default function AdminUsersPage() {
     const [newUserPassword, setNewUserPassword] = useState('');
     const [newUserRole, setNewUserRole] = useState('user');
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 
     const fetchUsers = useCallback(async () => {
         const token = localStorage.getItem('auth_token');
         try {
-            const response = await fetch(`${API_URL}/api/admin/users`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/admin/users`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                 },
@@ -56,7 +57,7 @@ export default function AdminUsersPage() {
         } finally {
             setLoading(false);
         }
-    }, [API_URL]);
+    }, []);
 
     useEffect(() => {
         if (!authLoading && !isAuthenticated) {
@@ -82,7 +83,7 @@ export default function AdminUsersPage() {
         setMessage('');
         const token = localStorage.getItem('auth_token');
         try {
-            const response = await fetch(`${API_URL}/api/admin/users/${userId}`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/admin/users/${userId}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
@@ -113,7 +114,7 @@ export default function AdminUsersPage() {
         setMessage('');
         const token = localStorage.getItem('auth_token');
         try {
-            const response = await fetch(`${API_URL}/api/admin/users/${resetPasswordId}/reset-password`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/admin/users/${resetPasswordId}/reset-password`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -141,7 +142,7 @@ export default function AdminUsersPage() {
         setSaving(true);
         const token = localStorage.getItem('auth_token');
         try {
-            const response = await fetch(`${API_URL}/api/admin/users/${userId}`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/admin/users/${userId}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -173,7 +174,7 @@ export default function AdminUsersPage() {
         setMessage('');
         const token = localStorage.getItem('auth_token');
         try {
-            const response = await fetch(`${API_URL}/api/admin/users`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/admin/users`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -373,8 +374,8 @@ export default function AdminUsersPage() {
                                             </select>
                                         ) : (
                                             <span className={`px-2 py-1 rounded text-xs font-medium ${u.role === 'admin'
-                                                    ? 'bg-purple-500/20 text-purple-400'
-                                                    : 'bg-gray-600/50 text-gray-300'
+                                                ? 'bg-purple-500/20 text-purple-400'
+                                                : 'bg-gray-600/50 text-gray-300'
                                                 }`}>
                                                 {u.role}
                                             </span>

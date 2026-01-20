@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import { useSettings } from '@/contexts/SettingsContext';
+import { getApiBaseUrl } from '@/lib/api';
 
 interface JobConfig {
     id: string;
@@ -44,12 +45,12 @@ export default function JobsPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isRunning, setIsRunning] = useState<Record<string, boolean>>({});
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 
     // Fetch jobs
     const fetchJobs = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/jobs`);
+            const response = await fetch(`${getApiBaseUrl()}/api/jobs`);
             if (response.ok) {
                 const data = await response.json();
                 setJobs(data.jobs || []);
@@ -74,7 +75,7 @@ export default function JobsPage() {
                 setSelectedJob(prev => prev ? { ...prev, ...updates } : null);
             }
 
-            const response = await fetch(`${API_URL}/api/jobs/${id}`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/jobs/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updates),
@@ -99,7 +100,7 @@ export default function JobsPage() {
     const runJob = async (id: string) => {
         setIsRunning(prev => ({ ...prev, [id]: true }));
         try {
-            const response = await fetch(`${API_URL}/api/jobs/${id}/run`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/jobs/${id}/run`, {
                 method: 'POST',
             });
             if (response.ok) {

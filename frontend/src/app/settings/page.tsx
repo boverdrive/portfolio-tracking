@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Header from '@/components/Header';
 import { useSettings, MarketConfig } from '@/contexts/SettingsContext';
 import { useAuth } from '@/lib/auth';
+import { getApiBaseUrl } from '@/lib/api';
 
 // Settings section components
 function LanguageSettings() {
@@ -282,7 +283,7 @@ function MarketSettings() {
         setApiStatus(prev => ({ ...prev, [marketId]: 'checking' }));
         try {
             // Use backend proxy to check API status (avoid CORS issues)
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/health-check?url=${encodeURIComponent(url)}`, {
+            const response = await fetch(`${getApiBaseUrl()}/api/health-check?url=${encodeURIComponent(url)}`, {
                 method: 'GET',
                 signal: AbortSignal.timeout(10000),
             });
@@ -700,7 +701,7 @@ function ExchangeRateSettings() {
         setIsLoading(true);
         setError(null);
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/exchange-rate/${base}`);
+            const response = await fetch(`${getApiBaseUrl()}/api/exchange-rate/${base}`);
             if (!response.ok) throw new Error('Failed to fetch rates');
             const data = await response.json();
             setRates(data.rates || {});

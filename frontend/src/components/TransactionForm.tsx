@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AssetType, TradeAction, Market, CreateTransactionRequest, Account, Transaction, PortfolioAsset } from '@/types';
-import { createTransaction, updateTransaction, getAssetTypeName, getMarketName, getMarketsByAssetType, getAssetTypeColor, getAccounts } from '@/lib/api';
+import { createTransaction, updateTransaction, getAssetTypeName, getMarketName, getMarketsByAssetType, getAssetTypeColor, getAccounts, getApiBaseUrl } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
 
 // Stock symbol suggestion type
@@ -415,7 +415,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                     marketParam = `&market=${formData.market}`;
                 }
             }
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${endpoint}?q=${encodeURIComponent(query)}&limit=10${marketParam}`);
+            const response = await fetch(`${getApiBaseUrl()}${endpoint}?q=${encodeURIComponent(query)}&limit=10${marketParam}`);
             if (response.ok) {
                 const data = await response.json();
                 setSymbolSuggestions(data);
@@ -586,10 +586,9 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
         if (!formData.symbol) return null;
         setIsFetchingPrice(true);
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
             const marketParam = formData.market ? `&market=${formData.market}` : '';
             const response = await fetch(
-                `${apiUrl}/api/prices/${encodeURIComponent(formData.symbol)}?asset_type=${formData.asset_type}${marketParam}`
+                `${getApiBaseUrl()}/api/prices/${encodeURIComponent(formData.symbol)}?asset_type=${formData.asset_type}${marketParam}`
             );
             if (response.ok) {
                 const data = await response.json();

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getApiBaseUrl } from '@/lib/api';
 
 interface StatusResponse {
     status: string;
@@ -15,12 +16,12 @@ export default function Footer() {
     const [status, setStatus] = useState<StatusResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 
     useEffect(() => {
         const checkStatus = async () => {
             try {
-                const response = await fetch(`${API_URL}/api/status`);
+                const response = await fetch(`${getApiBaseUrl()}/api/status`);
                 if (response.ok) {
                     const data = await response.json();
                     setStatus(data);
@@ -41,7 +42,7 @@ export default function Footer() {
         const interval = setInterval(checkStatus, 30000);
 
         return () => clearInterval(interval);
-    }, [API_URL]);
+    }, []);
 
     const isOnline = status?.pocketbase?.connected ?? false;
 

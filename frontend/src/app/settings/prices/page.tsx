@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import { useSettings } from '@/contexts/SettingsContext';
+import { getApiBaseUrl } from '@/lib/api';
 
 interface AssetPrice {
     id: string;
@@ -170,8 +171,7 @@ export default function PricesSettingsPage() {
     const handleRefreshAll = async () => {
         setRefreshing(true);
         try {
-            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-            const jobsResponse = await fetch(`${API_URL}/api/jobs`);
+            const jobsResponse = await fetch(`${getApiBaseUrl()}/api/jobs`);
             if (!jobsResponse.ok) throw new Error('Failed to fetch jobs');
 
             const jobsData = await jobsResponse.json();
@@ -182,7 +182,7 @@ export default function PricesSettingsPage() {
                 return;
             }
 
-            const runResponse = await fetch(`${API_URL}/api/jobs/${priceJob.id}/run`, {
+            const runResponse = await fetch(`${getApiBaseUrl()}/api/jobs/${priceJob.id}/run`, {
                 method: 'POST'
             });
 
