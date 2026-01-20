@@ -117,6 +117,27 @@ The easiest way to run the application is using Docker Compose.
    - **Backend**: http://localhost:3001 (or your configured `BACKEND_PORT`)
    - **PocketBase Admin**: http://localhost:8090/_/
 
+### 🚀 Remote Access / Deploying to a Server
+
+If you are deploying this to a server or want to access it from another device on your LAN:
+
+1.  **Update `.env`**:
+    Set `NEXT_PUBLIC_API_URL` to your server's IP address or Domain Name.
+    ```env
+    NEXT_PUBLIC_API_URL=http://192.168.1.53:3001
+    ```
+
+    ```env
+    NEXT_PUBLIC_API_URL=http://192.168.1.53:3001
+    ```
+
+2.  **Restart Frontend**:
+    The Docker image is now smart enough to pick up this change automatically! Just restart the container:
+    ```bash
+    docker compose restart frontend
+    ```
+    *(Note: No rebuild is required if you are using the latest generic image)*
+
 ### 2. Manual Setup (Local Development)
 
 If you want to run services individually without Docker (except PocketBase which is recommended to run separately or via the binary).

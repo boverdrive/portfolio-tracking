@@ -23,6 +23,7 @@ export default function RootLayout({
   return (
     <html lang="th">
       <body className={`${inter.variable} antialiased`}>
+        <script src="/env.js" defer />
         <AuthProvider>
           <SettingsProvider>
             {children}

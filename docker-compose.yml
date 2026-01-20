@@ -28,7 +28,7 @@ services:
     environment:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=${BACKEND_PORT:-3001}
-      - POCKETBASE_URL=http://pocketbase:8090
+      - POCKETBASE_URL=${POCKETBASE_URL:-http://pocketbase:8090}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-${FRONTEND_URL:-http://localhost:3000}}
       # Credentials to connect to PocketBase
