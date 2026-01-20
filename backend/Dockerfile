@@ -8,11 +8,27 @@ RUN apt-get update && \
     apt-get install -y pkg-config libssl-dev cmake && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy source code
-COPY . .
+# Copy manifest files to cache dependencies
+COPY Cargo.toml Cargo.lock ./
+
+# Create a dummy main.rs to build dependencies
+RUN mkdir src && \
+    echo "fn main() {println!(\"if you see this, the build broke\")}" > src/main.rs
+
+# Build dependencies only (release mode)
+RUN cargo build --release
+
+# Remove the dummy build artifacts so the real code allows a fresh build
+# We need to remove the binary and the specific package dependency info
+RUN rm src/*.rs && \
+    rm -f target/release/deps/portfolio_backend*
+
+# Copy actual source code
+COPY src ./src
 
 # Build the application
-RUN cargo build --release
+# modifying the main file timestamp to ensure rebuild
+RUN touch src/main.rs && cargo build --release
 
 # Runtime stage
 FROM debian:bookworm-slim

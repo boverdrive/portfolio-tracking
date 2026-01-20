@@ -103,7 +103,7 @@ async fn main() {
         job_scheduler,
         symbols_service,
         rate_limiter,
-        config: Arc::new(config),
+        config: Arc::new(config.clone()),
     };
 
     // Build router
@@ -207,7 +207,12 @@ async fn main() {
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
-                .allow_origin("http://localhost:3000".parse::<axum::http::HeaderValue>().unwrap())
+                .allow_origin(
+                    config.cors_allowed_origins
+                        .iter()
+                        .map(|origin| origin.parse::<axum::http::HeaderValue>().unwrap())
+                        .collect::<Vec<_>>()
+                )
                 .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE, axum::http::Method::PATCH, axum::http::Method::OPTIONS])
                 .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION, axum::http::header::COOKIE])
                 .allow_credentials(true),

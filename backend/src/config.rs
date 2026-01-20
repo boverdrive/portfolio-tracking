@@ -33,6 +33,8 @@ pub struct Config {
     // PocketBase connection credentials (infrastructure)
     pub pb_admin_email: Option<String>,
     pub pb_admin_password: Option<String>,
+    // CORS configuration
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl Config {
@@ -94,6 +96,11 @@ impl Config {
             // PocketBase connection credentials (Infrastructure)
             pb_admin_email: env::var("POCKETBASE_ADMIN_EMAIL").ok().filter(|v| !v.is_empty()),
             pb_admin_password: env::var("POCKETBASE_ADMIN_PASSWORD").ok().filter(|v| !v.is_empty()),
+            cors_allowed_origins: env::var("CORS_ALLOWED_ORIGINS")
+                .unwrap_or_else(|_| "http://localhost:3000".to_string())
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect(),
         }
     }
 
