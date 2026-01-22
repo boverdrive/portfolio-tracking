@@ -148,6 +148,39 @@ To build and push updates for all services (Backend, Frontend, Yahoo Finance) su
 
 This script uses `docker buildx` to ensure your images work on any server.
 
+### 4. Yahoo Finance Service Configuration
+
+The Yahoo Finance microservice can be configured via environment variables in your `.env` file:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `YAHOO_FINANCE_PORT` | `8000` | Port that the server listens on |
+| `YAHOO_FINANCE_HOST` | `0.0.0.0` | Host address to bind |
+| `YAHOO_FINANCE_LOG_LEVEL` | `INFO` | Log level: DEBUG, INFO, WARNING, ERROR |
+| `PROXY_URL` | - | Optional proxy for Yahoo Finance requests |
+
+Example `.env` configuration:
+```env
+YAHOO_FINANCE_PORT=8080
+YAHOO_FINANCE_LOG_LEVEL=DEBUG
+PROXY_URL=http://your-proxy:8888
+```
+
+**Running locally (without Docker):**
+```bash
+cd yahoo-finance
+pip install -r requirements.txt
+cd src
+YAHOO_FINANCE_PORT=8000 uvicorn server_http:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**API Endpoints:**
+- `GET /health` - Health check
+- `GET /api/ticker/{symbol}` - Get ticker info (e.g., `/api/ticker/AAPL`)
+- `GET /api/news/{symbol}?count=10` - Get ticker news
+- `GET /api/search?q={query}&count=10` - Search symbols
+- `GET /api/price-history/{symbol}?period=1y&interval=1d` - Get price history
+
 If you want to run services individually without Docker (except PocketBase which is recommended to run separately or via the binary).
 
 #### Backend
