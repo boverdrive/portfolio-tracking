@@ -34,7 +34,7 @@ services:
       # Credentials to connect to PocketBase
       - POCKETBASE_ADMIN_EMAIL=${POCKETBASE_ADMIN_EMAIL}
       - POCKETBASE_ADMIN_PASSWORD=${POCKETBASE_ADMIN_PASSWORD}
-      - YAHOO_FINANCE_SERVICE_URL=http://yahoo-finance:${YAHOO_FINANCE_PORT:-8000}
+      - YAHOO_FINANCE_SERVICE_URL=${YAHOO_FINANCE_SERVICE_URL:-http://yahoo-finance:${YAHOO_FINANCE_PORT:-8000}}
     depends_on:
       - pocketbase
       - yahoo-finance
