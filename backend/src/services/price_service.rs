@@ -947,9 +947,8 @@ impl PriceService {
         match symbol {
             // SET50 Index Futures (S50) - use SET50 Index
             s if s.starts_with("S50") => Some(("^SET50.BK".to_string(), "THB")),
-            // SVF (SET50 Value Futures) - different product, no Yahoo source, use mock
-            // Price range: ~40-100, Multiplier: 3000 THB
-            s if s.starts_with("SVF") => None,
+            // SVF (SET50 Value Futures) - use Silver Futures as proxy, price in THB
+            s if s.starts_with("SVF") => Some(("SI=F".to_string(), "THB")),
             // Gold Futures - use international gold futures
             s if s.starts_with("GF") || s.starts_with("GD") => Some(("GC=F".to_string(), "USD")),
             // Silver Futures (SV but NOT SVF)
