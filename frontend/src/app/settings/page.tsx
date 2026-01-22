@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import { useSettings, MarketConfig } from '@/contexts/SettingsContext';
@@ -604,6 +604,14 @@ function SystemSettings() {
     const [seeding, setSeeding] = useState(false);
     const [seedResult, setSeedResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
+    // File upload state
+    const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+    const [seedData, setSeedData] = useState<any | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const [uploadResult, setUploadResult] = useState<any | null>(null);
+    const [dragOver, setDragOver] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const handleSeed = async () => {
         if (!confirm(t('การ Seed จะทำการเพิ่มข้อมูล Symbol ตั้งต้นลงในฐานข้อมูล ยืนยัน?', 'Seed default symbols to database?'))) {
             return;
@@ -612,7 +620,6 @@ function SystemSettings() {
         setSeeding(true);
         setSeedResult(null);
         try {
-            // Import dynamically or use the one from api.ts if available in context
             const { seedSymbols } = await import('@/lib/api');
             const result = await seedSymbols();
             setSeedResult({ type: 'success', message: result.message });
@@ -623,12 +630,86 @@ function SystemSettings() {
         }
     };
 
+    // Handle file selection
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            processFile(file);
+        }
+    };
+
+    // Process uploaded file
+    const processFile = async (file: File) => {
+        if (!file.name.endsWith('.json')) {
+            setUploadResult({ success: false, message: t('กรุณาเลือกไฟล์ JSON', 'Please select a JSON file') });
+            return;
+        }
+
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            setUploadedFile(file);
+            setSeedData(data);
+            setUploadResult(null);
+        } catch (err) {
+            setUploadResult({ success: false, message: t('ไฟล์ JSON ไม่ถูกต้อง', 'Invalid JSON file') });
+        }
+    };
+
+    // Handle drag and drop
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(false);
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            processFile(file);
+        }
+    };
+
+    // Upload seed data to backend
+    const handleUploadSeed = async () => {
+        if (!seedData) return;
+
+        if (!confirm(t('ต้องการ Seed ข้อมูลนี้ลง Database หรือไม่?', 'Upload and seed this data to database?'))) {
+            return;
+        }
+
+        setUploading(true);
+        setUploadResult(null);
+        try {
+            const response = await fetch(`${getApiBaseUrl()}/api/seed/upload`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(seedData),
+            });
+
+            const result = await response.json();
+            setUploadResult(result);
+        } catch (err) {
+            setUploadResult({ success: false, message: err instanceof Error ? err.message : 'Upload failed' });
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    // Get collection summary
+    const getCollectionSummary = () => {
+        if (!seedData) return [];
+        const collections = ['users', 'api_rate_limits', 'jobs', 'api_providers', 'symbols', 'asset_prices'];
+        return collections
+            .filter(col => seedData[col] && seedData[col].length > 0)
+            .map(col => ({ name: col, count: seedData[col].length }));
+    };
+
+    const collectionSummary = getCollectionSummary();
+
     return (
         <div className="space-y-4">
             <h3 className="text-lg font-semibold text-white flex items-center gap-2">
                 🔧 {t('ระบบ', 'System')}
             </h3>
 
+            {/* Seed Symbols Section */}
             <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
                 <div className="flex items-center justify-between mb-2">
                     <div>
@@ -661,6 +742,102 @@ function SystemSettings() {
                 {seedResult && (
                     <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${seedResult.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                         {seedResult.message}
+                    </div>
+                )}
+            </div>
+
+            {/* Upload Seed Data Section */}
+            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
+                <div className="mb-4">
+                    <h4 className="text-white font-medium">{t('อัปโหลด Seed Data', 'Upload Seed Data')}</h4>
+                    <p className="text-sm text-gray-400">
+                        {t('อัปโหลดไฟล์ seed-data.json เพื่อ import ข้อมูลเริ่มต้น', 'Upload seed-data.json to import initial data')}
+                    </p>
+                </div>
+
+                {/* Drop Zone */}
+                <div
+                    onDrop={handleDrop}
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all ${dragOver
+                        ? 'border-emerald-500 bg-emerald-500/10'
+                        : 'border-gray-600 hover:border-gray-500 hover:bg-gray-700/30'
+                        }`}
+                >
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json"
+                        onChange={handleFileChange}
+                        className="hidden"
+                    />
+                    <div className="text-4xl mb-2">📁</div>
+                    {uploadedFile ? (
+                        <div className="text-emerald-400">
+                            ✅ {uploadedFile.name}
+                        </div>
+                    ) : (
+                        <div className="text-gray-400">
+                            {t('ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์', 'Drop file here or click to select')}
+                            <div className="text-xs text-gray-500 mt-1">seed-data.json</div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Collection Preview */}
+                {collectionSummary.length > 0 && (
+                    <div className="mt-4">
+                        <h5 className="text-sm text-gray-400 mb-2">{t('ข้อมูลที่จะ Import:', 'Data to import:')}</h5>
+                        <div className="flex flex-wrap gap-2">
+                            {collectionSummary.map(col => (
+                                <span key={col.name} className="px-2 py-1 bg-gray-700/50 rounded text-sm text-gray-300">
+                                    {col.name}: <span className="text-emerald-400">{col.count}</span>
+                                </span>
+                            ))}
+                        </div>
+
+                        <button
+                            onClick={handleUploadSeed}
+                            disabled={uploading}
+                            className="mt-4 w-full px-4 py-3 bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-600 rounded-lg text-white font-medium transition-all flex items-center justify-center gap-2"
+                        >
+                            {uploading ? (
+                                <>
+                                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    {t('กำลังอัปโหลด...', 'Uploading...')}
+                                </>
+                            ) : (
+                                <>
+                                    🚀 {t('เริ่ม Import ข้อมูล', 'Start Import')}
+                                </>
+                            )}
+                        </button>
+                    </div>
+                )}
+
+                {/* Upload Result */}
+                {uploadResult && (
+                    <div className={`mt-4 p-4 rounded-lg ${uploadResult.success ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-rose-500/10 border border-rose-500/30'}`}>
+                        <div className={`font-medium mb-2 ${uploadResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {uploadResult.success ? '✅ ' : '❌ '}{uploadResult.message}
+                        </div>
+                        {uploadResult.results && (
+                            <div className="space-y-1 text-sm">
+                                {uploadResult.results.map((r: any) => (
+                                    <div key={r.collection} className="flex items-center gap-2 text-gray-300">
+                                        <span className="font-mono">{r.collection}:</span>
+                                        <span className="text-emerald-400">+{r.created}</span>
+                                        <span className="text-yellow-400">⏭{r.skipped}</span>
+                                        {r.errors > 0 && <span className="text-rose-400">✗{r.errors}</span>}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

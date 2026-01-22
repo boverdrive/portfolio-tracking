@@ -202,6 +202,9 @@ async fn main() {
         .route("/api/logs", get(handlers::get_api_logs))
         .route("/api/logs/stats", get(handlers::get_api_stats))
         
+        // Seed data routes
+        .route("/api/seed/upload", post(handlers::upload_seed))
+        
         // Add middleware
 
         .layer(TraceLayer::new_for_http())
