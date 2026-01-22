@@ -893,11 +893,16 @@ impl PriceService {
         
         // Mock prices for TFEX symbols
         let mock_prices: HashMap<&str, f64> = [
-            // SET50 Index Futures
+            // SET50 Index Futures (S50) - trades around 880-930, multiplier 200
             ("S50", 925.00), 
             ("S50H24", 920.00), ("S50M24", 922.00), ("S50U24", 924.00), ("S50Z24", 926.00),
             ("S50H25", 925.00), ("S50M25", 927.00), ("S50U25", 929.00), ("S50Z25", 931.00),
             ("S50H26", 928.00), ("S50M26", 930.00), ("S50U26", 932.00), ("S50Z26", 934.00),
+            // SET50 Value Futures (SVF) - trades around 40-100, multiplier 3000
+            ("SVF", 95.00),
+            ("SVFH24", 45.00), ("SVFM24", 50.00), ("SVFU24", 55.00), ("SVFZ24", 60.00),
+            ("SVFH25", 70.00), ("SVFM25", 75.00), ("SVFU25", 80.00), ("SVFZ25", 85.00),
+            ("SVFH26", 95.00), ("SVFM26", 98.00),
             // Gold Futures (10 Baht)
             ("GFH24", 35200.0), ("GFM24", 35300.0), ("GFU24", 35400.0), ("GFZ24", 35500.0),
             ("GFH25", 35600.0), ("GFM25", 35700.0), ("GFU25", 35800.0), ("GFZ25", 35900.0),
@@ -906,7 +911,7 @@ impl PriceService {
             ("GDH24", 176000.0), ("GDM24", 176500.0), ("GDU24", 177000.0), ("GDZ24", 177500.0),
             ("GDH25", 178000.0), ("GDM25", 178500.0), ("GDU25", 179000.0), ("GDZ25", 179500.0),
             ("GDH26", 180000.0), ("GDM26", 180500.0),
-            // Silver Futures
+            // Silver Futures (SV) - TFEX Silver, trades in THB
             ("SVH24", 955.0), ("SVM24", 960.0), ("SVU24", 965.0), ("SVZ24", 970.0),
             ("SVH25", 975.0), ("SVM25", 980.0), ("SVH26", 990.0),
             // USD Futures
@@ -940,10 +945,11 @@ impl PriceService {
     fn get_tfex_yahoo_symbol(&self, symbol: &str) -> Option<(String, &'static str)> {
         // Map TFEX symbols to Yahoo Finance equivalents
         match symbol {
-            // SET50 Index/Futures - use SET50 Index
+            // SET50 Index Futures (S50) - use SET50 Index
             s if s.starts_with("S50") => Some(("^SET50.BK".to_string(), "THB")),
-            // SET50 Value Futures (SVF) - also uses SET50 Index
-            s if s.starts_with("SVF") => Some(("^SET50.BK".to_string(), "THB")),
+            // SVF (SET50 Value Futures) - different product, no Yahoo source, use mock
+            // Price range: ~40-100, Multiplier: 3000 THB
+            s if s.starts_with("SVF") => None,
             // Gold Futures - use international gold futures
             s if s.starts_with("GF") || s.starts_with("GD") => Some(("GC=F".to_string(), "USD")),
             // Silver Futures (SV but NOT SVF)
