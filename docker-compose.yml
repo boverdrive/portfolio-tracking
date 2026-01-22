@@ -34,7 +34,7 @@ services:
       # Credentials to connect to PocketBase
       - POCKETBASE_ADMIN_EMAIL=${POCKETBASE_ADMIN_EMAIL}
       - POCKETBASE_ADMIN_PASSWORD=${POCKETBASE_ADMIN_PASSWORD}
-      - YAHOO_FINANCE_SERVICE_URL=http://yahoo-finance:8000
+      - YAHOO_FINANCE_SERVICE_URL=http://yahoo-finance:${YAHOO_FINANCE_PORT:-8000}
     depends_on:
       - pocketbase
       - yahoo-finance
@@ -48,8 +48,11 @@ services:
     container_name: portfolio-yahoo-finance
     restart: unless-stopped
     expose:
-      - "8000"
+      - "${YAHOO_FINANCE_PORT:-8000}"
     environment:
+      - YAHOO_FINANCE_HOST=${YAHOO_FINANCE_HOST:-0.0.0.0}
+      - YAHOO_FINANCE_PORT=${YAHOO_FINANCE_PORT:-8000}
+      - YAHOO_FINANCE_LOG_LEVEL=${YAHOO_FINANCE_LOG_LEVEL:-INFO}
       - PROXY_URL=${PROXY_URL}
 
   # Frontend Service (Next.js)

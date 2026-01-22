@@ -13,8 +13,13 @@ COPY src/ /app/src/
 # Set Python path to include src
 ENV PYTHONPATH=/app/src
 
-# Expose port
+# Configuration defaults (can be overridden at runtime)
+ENV YAHOO_FINANCE_HOST=0.0.0.0
+ENV YAHOO_FINANCE_PORT=8000
+ENV YAHOO_FINANCE_LOG_LEVEL=INFO
+
+# Expose port (documentation only, actual port set by env)
 EXPOSE 8000
 
-# Run the server
-CMD ["uvicorn", "server_http:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Run the server using environment variables
+CMD uvicorn server_http:app --host $YAHOO_FINANCE_HOST --port $YAHOO_FINANCE_PORT --workers 1

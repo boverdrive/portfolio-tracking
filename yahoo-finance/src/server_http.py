@@ -18,13 +18,18 @@ from yahoo_finance_server.helper import (
     get_top_entities
 )
 
+# Configuration from environment variables
+YAHOO_FINANCE_HOST = os.getenv("YAHOO_FINANCE_HOST", "0.0.0.0")
+YAHOO_FINANCE_PORT = int(os.getenv("YAHOO_FINANCE_PORT", "8000"))
+LOG_LEVEL = os.getenv("YAHOO_FINANCE_LOG_LEVEL", "INFO").upper()
+
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("yahoo-finance-http")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Yahoo Finance HTTP Service starting...")
+    logger.info(f"Yahoo Finance HTTP Service starting on {YAHOO_FINANCE_HOST}:{YAHOO_FINANCE_PORT}...")
     yield
     logger.info("Yahoo Finance HTTP Service stopping...")
 
@@ -79,4 +84,4 @@ async def price_history(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=YAHOO_FINANCE_HOST, port=YAHOO_FINANCE_PORT)
