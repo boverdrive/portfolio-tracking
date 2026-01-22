@@ -204,6 +204,7 @@ async fn main() {
         
         // Seed data routes
         .route("/api/seed/upload", post(handlers::upload_seed))
+        .route("/api/seed/export", get(handlers::export_seed))
         
         // Add middleware
 

@@ -703,6 +703,44 @@ function SystemSettings() {
 
     const collectionSummary = getCollectionSummary();
 
+    // Export state
+    const [exporting, setExporting] = useState(false);
+    const [exportResult, setExportResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+
+    // Export seed data
+    const handleExport = async () => {
+        setExporting(true);
+        setExportResult(null);
+        try {
+            const response = await fetch(`${getApiBaseUrl()}/api/seed/export`);
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                // Download as JSON file
+                const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `seed-data-${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                setExportResult({
+                    type: 'success',
+                    message: t(`ส่งออกข้อมูลเรียบร้อย (${result.message})`, `Export complete (${result.message})`)
+                });
+            } else {
+                setExportResult({ type: 'error', message: result.message || 'Export failed' });
+            }
+        } catch (err) {
+            setExportResult({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' });
+        } finally {
+            setExporting(false);
+        }
+    };
+
     return (
         <div className="space-y-4">
             <h3 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -742,6 +780,43 @@ function SystemSettings() {
                 {seedResult && (
                     <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${seedResult.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                         {seedResult.message}
+                    </div>
+                )}
+            </div>
+
+            {/* Export Seed Data Section */}
+            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700/50">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h4 className="text-white font-medium">{t('ส่งออก Seed Data', 'Export Seed Data')}</h4>
+                        <p className="text-sm text-gray-400">
+                            {t('ดาวน์โหลดข้อมูลปัจจุบันเป็นไฟล์ JSON สำหรับ backup หรือย้ายเครื่อง', 'Download current data as JSON for backup or migration')}
+                        </p>
+                    </div>
+                    <button
+                        onClick={handleExport}
+                        disabled={exporting}
+                        className="px-4 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-600 rounded-lg text-white text-sm transition-all flex items-center gap-2"
+                    >
+                        {exporting ? (
+                            <>
+                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                {t('กำลังส่งออก...', 'Exporting...')}
+                            </>
+                        ) : (
+                            <>
+                                📤 {t('Export', 'Export')}
+                            </>
+                        )}
+                    </button>
+                </div>
+
+                {exportResult && (
+                    <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${exportResult.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        {exportResult.message}
                     </div>
                 )}
             </div>
