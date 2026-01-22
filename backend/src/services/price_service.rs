@@ -942,10 +942,12 @@ impl PriceService {
         match symbol {
             // SET50 Index/Futures - use SET50 Index
             s if s.starts_with("S50") => Some(("^SET50.BK".to_string(), "THB")),
+            // SET50 Value Futures (SVF) - also uses SET50 Index
+            s if s.starts_with("SVF") => Some(("^SET50.BK".to_string(), "THB")),
             // Gold Futures - use international gold futures
             s if s.starts_with("GF") || s.starts_with("GD") => Some(("GC=F".to_string(), "USD")),
-            // Silver Futures
-            s if s.starts_with("SV") => Some(("SI=F".to_string(), "USD")),
+            // Silver Futures (SV but NOT SVF)
+            s if s.starts_with("SV") && !s.starts_with("SVF") => Some(("SI=F".to_string(), "USD")),
             // Brent Crude Oil
             s if s.starts_with("BRN") => Some(("BZ=F".to_string(), "USD")),
             // USD/THB - no direct equivalent, fallback to mock
