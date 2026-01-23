@@ -361,7 +361,7 @@ export default function AccountManager({ onAccountSelect, selectedAccountId, tra
         });
 
         // ========== FUTURES (TFEX) ==========
-        // Calculate REALIZED P&L only (from closed positions)
+        // Calculate REALIZED P&L (from closed positions) + UNREALIZED P&L (from open positions)
         const futuresBySymbol = new Map<string, typeof futuresTransactions>();
         futuresTransactions.forEach(tx => {
             const list = futuresBySymbol.get(tx.symbol) || [];
@@ -369,7 +369,7 @@ export default function AccountManager({ onAccountSelect, selectedAccountId, tra
             futuresBySymbol.set(tx.symbol, list);
         });
 
-        futuresBySymbol.forEach((txs) => {
+        futuresBySymbol.forEach((txs, symbol) => {
             txs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
             let longQueue: { quantity: number; price: number; leverage: number }[] = [];
@@ -404,6 +404,29 @@ export default function AccountManager({ onAccountSelect, selectedAccountId, tra
                         entry.quantity -= matched;
                         if (entry.quantity <= 0) shortQueue.shift();
                     }
+                }
+            });
+
+            // ========== UNREALIZED P&L for Open Positions ==========
+            // Find current price from portfolio assets
+            const asset = portfolio?.assets?.find(a => a.symbol === symbol && a.asset_type === 'tfex');
+            const currentPrice = asset?.current_price || 0;
+
+            // Long positions still open
+            longQueue.forEach(entry => {
+                if (entry.quantity > 0 && currentPrice > 0) {
+                    const unrealizedPnl = (currentPrice - entry.price) * entry.quantity * entry.leverage;
+                    console.log(`[TFEX Unrealized] ${symbol} Long: (${currentPrice} - ${entry.price}) × ${entry.quantity} × ${entry.leverage} = ${unrealizedPnl}`);
+                    totalValue += unrealizedPnl;
+                }
+            });
+
+            // Short positions still open
+            shortQueue.forEach(entry => {
+                if (entry.quantity > 0 && currentPrice > 0) {
+                    const unrealizedPnl = (entry.price - currentPrice) * entry.quantity * entry.leverage;
+                    console.log(`[TFEX Unrealized] ${symbol} Short: (${entry.price} - ${currentPrice}) × ${entry.quantity} × ${entry.leverage} = ${unrealizedPnl}`);
+                    totalValue += unrealizedPnl;
                 }
             });
         });
