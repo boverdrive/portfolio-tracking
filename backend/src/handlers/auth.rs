@@ -1,6 +1,6 @@
 use axum::{
     extract::{Query, State, Path},
-    http::StatusCode,
+    http::{StatusCode, HeaderMap},
     response::{IntoResponse, Redirect},
     Json,
 };
@@ -14,6 +14,12 @@ use crate::services::auth::OAuthCallbackParams;
 use crate::AppState;
 
 const AUTH_COOKIE_NAME: &str = "auth_token";
+
+/// Query params for OAuth login (optional redirect_uri for apps)
+#[derive(Debug, Deserialize)]
+pub struct OAuthLoginParams {
+    pub redirect_uri: Option<String>,
+}
 
 /// Available auth providers response
 #[derive(Debug, Serialize)]
@@ -136,14 +142,19 @@ pub async fn local_register(
 
 /// GET /api/auth/google - Redirect to Google OAuth
 pub async fn google_login(
+    Query(params): Query<OAuthLoginParams>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let auth = &state.auth_service;
     
     let (auth_url, csrf_token, pkce_verifier) = auth.get_google_auth_url()?;
     
-    // Store PKCE verifier for callback
-    auth.store_pkce_verifier(csrf_token.secret(), pkce_verifier.secret()).await;
+    // Store PKCE verifier and optional redirect_uri for callback
+    let verifier_with_redirect = match params.redirect_uri {
+        Some(uri) => format!("{}|{}", pkce_verifier.secret(), uri),
+        None => pkce_verifier.secret().to_string(),
+    };
+    auth.store_pkce_verifier(csrf_token.secret(), &verifier_with_redirect).await;
     
     Ok(Redirect::to(&auth_url))
 }
@@ -156,9 +167,16 @@ pub async fn google_callback(
 ) -> Result<impl IntoResponse, AppError> {
     let auth = &state.auth_service;
     
-    // Get PKCE verifier
-    let verifier_secret = auth.get_pkce_verifier(&params.state).await
+    // Get PKCE verifier (may contain redirect_uri)
+    let verifier_data = auth.get_pkce_verifier(&params.state).await
         .ok_or_else(|| AppError::OAuth("Invalid state parameter".to_string()))?;
+    
+    let (verifier_secret, custom_redirect) = if verifier_data.contains('|') {
+        let parts: Vec<&str> = verifier_data.splitn(2, '|').collect();
+        (parts[0].to_string(), Some(parts[1].to_string()))
+    } else {
+        (verifier_data, None)
+    };
     let pkce_verifier = PkceCodeVerifier::new(verifier_secret);
     
     // Exchange code for token
@@ -190,7 +208,7 @@ pub async fn google_callback(
     // Create JWT
     let jwt = auth.create_jwt(&user)?;
     
-    // Set cookie and redirect to frontend
+    // Set cookie and redirect to frontend or custom redirect_uri
     let cookie = Cookie::build((AUTH_COOKIE_NAME, jwt.clone()))
         .path("/")
         .http_only(true)
@@ -200,7 +218,7 @@ pub async fn google_callback(
     
     let redirect_url = format!(
         "{}?token={}",
-        state.config.frontend_url,
+        custom_redirect.unwrap_or_else(|| state.config.frontend_url.clone()),
         urlencoding::encode(&jwt)
     );
     
@@ -211,14 +229,19 @@ pub async fn google_callback(
 
 /// GET /api/auth/oidc - Redirect to custom OIDC provider
 pub async fn oidc_login(
+    Query(params): Query<OAuthLoginParams>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let auth = &state.auth_service;
     
     let (auth_url, csrf_token, pkce_verifier) = auth.get_oidc_auth_url().await?;
     
-    // Store PKCE verifier for callback
-    auth.store_pkce_verifier(csrf_token.secret(), pkce_verifier.secret()).await;
+    // Store PKCE verifier and optional redirect_uri for callback
+    let verifier_with_redirect = match params.redirect_uri {
+        Some(uri) => format!("{}|{}", pkce_verifier.secret(), uri),
+        None => pkce_verifier.secret().to_string(),
+    };
+    auth.store_pkce_verifier(csrf_token.secret(), &verifier_with_redirect).await;
     
     Ok(Redirect::to(&auth_url))
 }
@@ -231,9 +254,16 @@ pub async fn oidc_callback(
 ) -> Result<impl IntoResponse, AppError> {
     let auth = &state.auth_service;
     
-    // Get PKCE verifier
-    let verifier_secret = auth.get_pkce_verifier(&params.state).await
+    // Get PKCE verifier (may contain redirect_uri)
+    let verifier_data = auth.get_pkce_verifier(&params.state).await
         .ok_or_else(|| AppError::OAuth("Invalid state parameter".to_string()))?;
+    
+    let (verifier_secret, custom_redirect) = if verifier_data.contains('|') {
+        let parts: Vec<&str> = verifier_data.splitn(2, '|').collect();
+        (parts[0].to_string(), Some(parts[1].to_string()))
+    } else {
+        (verifier_data, None)
+    };
     let pkce_verifier = PkceCodeVerifier::new(verifier_secret);
     
     // Exchange code for token
@@ -272,7 +302,7 @@ pub async fn oidc_callback(
     // Create JWT
     let jwt = auth.create_jwt(&user)?;
     
-    // Set cookie and redirect to frontend
+    // Set cookie and redirect to frontend or custom redirect_uri
     let cookie = Cookie::build((AUTH_COOKIE_NAME, jwt.clone()))
         .path("/")
         .http_only(true)
@@ -282,7 +312,7 @@ pub async fn oidc_callback(
     
     let redirect_url = format!(
         "{}?token={}",
-        state.config.frontend_url,
+        custom_redirect.unwrap_or_else(|| state.config.frontend_url.clone()),
         urlencoding::encode(&jwt)
     );
     
@@ -294,9 +324,10 @@ pub async fn oidc_callback(
 /// GET /api/auth/me - Get current user info
 pub async fn get_current_user(
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> Result<Json<UserResponse>, AppError> {
-    let user = extract_user_from_cookie(&state, &jar).await?;
+    let user = extract_user(&state, &jar, &headers).await?;
     Ok(Json(UserResponse::from(&user)))
 }
 
@@ -316,9 +347,10 @@ pub async fn logout(
 /// GET /api/auth/linked-providers - Get linked OAuth providers for current user
 pub async fn get_linked_providers(
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> Result<Json<Vec<LinkedProvider>>, AppError> {
-    let user = extract_user_from_cookie(&state, &jar).await?;
+    let user = extract_user(&state, &jar, &headers).await?;
     let providers = state.auth_service.get_linked_providers(&user.id).await;
     Ok(Json(providers))
 }
@@ -327,9 +359,10 @@ pub async fn get_linked_providers(
 pub async fn unlink_provider(
     Path(provider): Path<String>,
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let user = extract_user_from_cookie(&state, &jar).await?;
+    let user = extract_user(&state, &jar, &headers).await?;
     
     let provider_enum: OAuthProvider = provider.parse()
         .map_err(|e: String| AppError::BadRequest(e))?;
@@ -342,9 +375,10 @@ pub async fn unlink_provider(
 /// POST /api/auth/logout-all - Logout from all devices
 pub async fn logout_all_devices(
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> Result<impl IntoResponse, AppError> {
-    let user = extract_user_from_cookie(&state, &jar).await?;
+    let user = extract_user(&state, &jar, &headers).await?;
     
     state.auth_service.logout_all_devices(&user.id).await?;
     
@@ -367,10 +401,11 @@ pub struct ChangePasswordRequest {
 
 pub async fn change_password(
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let user = extract_user_from_cookie(&state, &jar).await?;
+    let user = extract_user(&state, &jar, &headers).await?;
     
     state.auth_service.change_password(&user.id, &req.old_password, &req.new_password).await?;
     
@@ -409,10 +444,28 @@ pub async fn verify_token(
 
 // ==================== Helper Functions ====================
 
-/// Extract user from cookie
-async fn extract_user_from_cookie(state: &AppState, jar: &CookieJar) -> Result<User, AppError> {
+/// Extract user from cookie or Authorization header
+async fn extract_user(state: &AppState, jar: &CookieJar, headers: &axum::http::HeaderMap) -> Result<User, AppError> {
+    // Try Authorization header first
+    if let Some(auth_header) = headers.get("Authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if auth_str.starts_with("Bearer ") {
+                let token = &auth_str[7..];
+                let claims = state.auth_service.verify_jwt(token)?;
+                let user = state.auth_service.get_user(&claims.sub).await?;
+                
+                // Check token version
+                if claims.token_version != user.token_version {
+                     return Err(AppError::Unauthorized("Token expired (version mismatch)".to_string()));
+                }
+                return Ok(user);
+            }
+        }
+    }
+
+    // Fallback to Cookie
     let cookie = jar.get(AUTH_COOKIE_NAME)
-        .ok_or_else(|| AppError::Unauthorized("No auth token".to_string()))?;
+        .ok_or_else(|| AppError::Unauthorized("No auth token found in Header or Cookie".to_string()))?;
     
     let claims = state.auth_service.verify_jwt(cookie.value())?;
     let user = state.auth_service.get_user(&claims.sub).await?;

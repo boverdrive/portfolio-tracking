@@ -328,11 +328,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
 
     // Fetch symbol suggestions (Thai stocks, TFEX, Crypto, or Foreign stocks)
     const fetchSymbolSuggestions = async (query: string) => {
-        if (query.length < 1) {
-            setSymbolSuggestions([]);
-            setShowSuggestions(false);
-            return;
-        }
+        // Allow empty query to fetch popular/default symbols
 
         // Auto-set default unit for Gold/Commodity
         if (formData.asset_type === 'gold' && !formData.unit) {
@@ -428,17 +424,33 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
         }
     };
 
+    const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+
     // Handle symbol input change with debounce
     const handleSymbolChange = (value: string) => {
         setFormData({ ...formData, symbol: value });
+
+        // Clear existing timeout
+        if (debounceTimeout.current) {
+            clearTimeout(debounceTimeout.current);
+        }
+
         if (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') {
-            // Debounce API calls
-            const timeoutId = setTimeout(() => {
+            // Set new timeout
+            debounceTimeout.current = setTimeout(() => {
                 fetchSymbolSuggestions(value);
-            }, 200);
-            return () => clearTimeout(timeoutId);
+            }, 300);
         }
     };
+
+    // Clean up timeout on unmount
+    useEffect(() => {
+        return () => {
+            if (debounceTimeout.current) {
+                clearTimeout(debounceTimeout.current);
+            }
+        };
+    }, []);
 
     // Get TFEX contract multiplier based on symbol prefix
     const getTfexMultiplier = (symbol: string): number => {
@@ -647,6 +659,12 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                         </svg>
                     </button>
                 )}
+            </div>
+
+            {/* DEBUG: API URL Display */}
+            <div className="px-6 py-2 bg-gray-800 text-xs font-mono text-gray-500 border-b border-gray-700/50 break-all">
+                API: {getApiBaseUrl()} <br />
+                IP: {typeof window !== 'undefined' ? window.location.hostname : 'SERVER'}
             </div>
 
             {/* Mode Tabs */}
@@ -859,7 +877,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                 value={formData.symbol}
                                 onChange={(e) => handleSymbolChange(e.target.value)}
                                 onFocus={() => {
-                                    if ((formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') && formData.symbol.length >= 1) {
+                                    if (formData.asset_type === 'stock' || formData.asset_type === 'tfex' || formData.asset_type === 'crypto' || formData.asset_type === 'foreign_stock' || formData.asset_type === 'gold' || formData.asset_type === 'commodity') {
                                         fetchSymbolSuggestions(formData.symbol);
                                     }
                                 }}

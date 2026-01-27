@@ -39,7 +39,11 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Self {
-        dotenvy::dotenv().ok();
+        // Try to load .env from current directory first, then parent
+        if dotenvy::dotenv().is_err() {
+            // Try loading from parent directory explicitly (useful when running from backend/ subdir)
+            let _ = dotenvy::from_path(std::path::Path::new("../.env"));
+        }
 
         Self {
             server_host: env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),

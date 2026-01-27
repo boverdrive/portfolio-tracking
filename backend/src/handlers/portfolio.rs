@@ -336,7 +336,7 @@ pub async fn get_portfolio(
         // For Thai stocks, TFEX, and Foreign stocks: use PocketBase first
         let use_pb_first = matches!(
             asset.asset_type,
-            crate::models::AssetType::Stock | crate::models::AssetType::Tfex | crate::models::AssetType::ForeignStock
+            crate::models::AssetType::Stock | crate::models::AssetType::ForeignStock
         );
         
         let mut found_price = false;

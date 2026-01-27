@@ -127,6 +127,7 @@ impl Default for JobConfig {
 
 /// Job run history entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct JobRunHistory {
     #[serde(default)]
     pub id: String,

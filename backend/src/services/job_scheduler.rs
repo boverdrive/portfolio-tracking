@@ -675,7 +675,7 @@ impl JobScheduler {
                 }
                 Err(e) => {
                     errors += 1;
-                    tracing::debug!("⚠️ Failed to fetch price for {}: {}", symbol, e);
+                    tracing::error!("❌ Failed to fetch price for {} ({}): {}", symbol, asset_type_str, e);
                 }
             }
         }

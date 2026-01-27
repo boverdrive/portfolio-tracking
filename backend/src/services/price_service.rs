@@ -899,10 +899,10 @@ impl PriceService {
             ("S50H25", 925.00), ("S50M25", 927.00), ("S50U25", 929.00), ("S50Z25", 931.00),
             ("S50H26", 928.00), ("S50M26", 930.00), ("S50U26", 932.00), ("S50Z26", 934.00),
             // SET50 Value Futures (SVF) - trades around 40-100, multiplier 3000
-            ("SVF", 95.00),
-            ("SVFH24", 45.00), ("SVFM24", 50.00), ("SVFU24", 55.00), ("SVFZ24", 60.00),
-            ("SVFH25", 70.00), ("SVFM25", 75.00), ("SVFU25", 80.00), ("SVFZ25", 85.00),
-            ("SVFH26", 95.00), ("SVFM26", 98.00),
+            // ("SVF", 95.00),
+            // ("SVFH24", 45.00), ("SVFM24", 50.00), ("SVFU24", 55.00), ("SVFZ24", 60.00),
+            // ("SVFH25", 70.00), ("SVFM25", 75.00), ("SVFU25", 80.00), ("SVFZ25", 85.00),
+            // ("SVFH26", 95.00), ("SVFM26", 98.00),
             // Gold Futures (10 Baht)
             ("GFH24", 35200.0), ("GFM24", 35300.0), ("GFU24", 35400.0), ("GFZ24", 35500.0),
             ("GFH25", 35600.0), ("GFM25", 35700.0), ("GFU25", 35800.0), ("GFZ25", 35900.0),
@@ -912,8 +912,8 @@ impl PriceService {
             ("GDH25", 178000.0), ("GDM25", 178500.0), ("GDU25", 179000.0), ("GDZ25", 179500.0),
             ("GDH26", 180000.0), ("GDM26", 180500.0),
             // Silver Futures (SV) - TFEX Silver, trades in THB
-            ("SVH24", 955.0), ("SVM24", 960.0), ("SVU24", 965.0), ("SVZ24", 970.0),
-            ("SVH25", 975.0), ("SVM25", 980.0), ("SVH26", 990.0),
+            // ("SVH24", 955.0), ("SVM24", 960.0), ("SVU24", 965.0), ("SVZ24", 970.0),
+            // ("SVH25", 975.0), ("SVM25", 980.0), ("SVH26", 990.0),
             // USD Futures
             ("USDH24", 34.50), ("USDM24", 34.55), ("USDU24", 34.60), ("USDZ24", 34.65),
             ("USDH25", 34.70), ("USDM25", 34.75), ("USDU25", 34.80), ("USDZ25", 34.85),
@@ -931,7 +931,7 @@ impl PriceService {
         let price = mock_prices
             .get(symbol)
             .copied()
-            .unwrap_or(100.0);
+            .ok_or_else(|| AppError::ExternalApiError(format!("Price data not available for {}", symbol)))?;
 
         Ok(PriceEntry {
             symbol: symbol.to_string(),

@@ -220,6 +220,7 @@ impl Default for PortfolioSummary {
 
 /// Summary by asset type
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct AssetTypeSummary {
     pub asset_type: AssetType,
     pub total_invested: f64,
@@ -231,6 +232,7 @@ pub struct AssetTypeSummary {
 
 /// Summary by market
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct MarketSummary {
     pub market: Market,
     pub total_invested: f64,
