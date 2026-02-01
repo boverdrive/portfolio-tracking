@@ -8,7 +8,10 @@ import { useSettings } from '@/contexts/SettingsContext';
 import { getTransactions, getPortfolio, getAccounts, formatCurrency, formatNumber, getAssetTypeName, DisplayCurrency, getAllExchangeRates } from '@/lib/api';
 import { Transaction, PortfolioResponse, Account } from '@/types';
 
+import { useRouter } from 'next/navigation';
+
 export default function AnalysisPage() {
+    const router = useRouter();
     const { t, settings, displayCurrency, setDisplayCurrency } = useSettings();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [portfolio, setPortfolio] = useState<PortfolioResponse | null>(null);
@@ -20,6 +23,7 @@ export default function AnalysisPage() {
     const [selectedMonthPerf, setSelectedMonthPerf] = useState<{ month: string; purchases: any[] } | null>(null);
     const [selectedMonthActivity, setSelectedMonthActivity] = useState<{ month: string; transactions: Transaction[] } | null>(null);
     const [selectedBreakdownType, setSelectedBreakdownType] = useState<string | null>(null);
+    const [overviewModalState, setOverviewModalState] = useState<'assets' | 'value' | 'pnl' | null>(null);
     const [sortConfig, setSortConfig] = useState<{ key: 'month' | 'buys' | 'sells' | 'count'; direction: 'asc' | 'desc' }>({ key: 'month', direction: 'desc' });
 
     // Currency state
@@ -89,7 +93,7 @@ export default function AnalysisPage() {
 
     // Helper functions for action types
     const isOpenAction = (action: string) => action === 'buy' || action === 'long';
-    const isCloseAction = (action: string) => action === 'sell' || action === 'short' || action === 'close_long' || action === 'close_short';
+    const isCloseAction = (action: string) => action === 'sell' || action === 'short' || action === 'close_long' || action === 'close_short' || action === 'liquidate_long' || action === 'liquidate_short';
 
     // Helper to convert to Base Currency (THB)
     const toBase = useCallback((amount: number, currency: string) => {
@@ -358,7 +362,7 @@ export default function AnalysisPage() {
             }
 
             // Separate spot and futures based on action type
-            const isFuturesAction = (action: string) => ['long', 'short', 'close_long', 'close_short'].includes(action.toLowerCase());
+            const isFuturesAction = (action: string) => ['long', 'short', 'close_long', 'close_short', 'liquidate_long', 'liquidate_short'].includes(action.toLowerCase());
             const spotTxs = accountTxs.filter(tx => !isFuturesAction(tx.action)).sort((a, b) => {
                 const timeA = new Date(a.timestamp).getTime();
                 const timeB = new Date(b.timestamp).getTime();
@@ -542,7 +546,7 @@ export default function AnalysisPage() {
                         longQueue.push({ quantity: tx.quantity, price: tx.price, leverage: multiplier });
                         // Add cost basis converted to THB
                         totalCostBasis += toThb(tx.quantity * tx.price * multiplier, txCurrency);
-                    } else if (tx.action === 'close_long') {
+                    } else if (tx.action === 'close_long' || tx.action === 'liquidate_long') {
                         let remaining = tx.quantity;
                         while (remaining > 0 && longQueue.length > 0) {
                             const entry = longQueue[0];
@@ -561,7 +565,7 @@ export default function AnalysisPage() {
                     } else if (tx.action === 'short') {
                         shortQueue.push({ quantity: tx.quantity, price: tx.price, leverage: multiplier });
                         totalCostBasis += toThb(tx.quantity * tx.price * multiplier, txCurrency);
-                    } else if (tx.action === 'close_short') {
+                    } else if (tx.action === 'close_short' || tx.action === 'liquidate_short') {
                         let remaining = tx.quantity;
                         while (remaining > 0 && shortQueue.length > 0) {
                             const entry = shortQueue[0];
@@ -707,23 +711,34 @@ export default function AnalysisPage() {
             <main className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
                 {/* Overview Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl border border-blue-500/30 p-4">
+                    <div
+                        onClick={() => setOverviewModalState('assets')}
+                        className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl border border-blue-500/30 p-4 cursor-pointer hover:scale-[1.02] transition-transform"
+                    >
                         <div className="text-blue-400 text-sm">{t('สินทรัพย์ทั้งหมด', 'Total Assets')}</div>
                         <div className="text-2xl font-bold text-white">{analysis?.totalAssets || 0}</div>
                     </div>
-                    <div className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 rounded-xl border border-emerald-500/30 p-4">
+                    <div
+                        onClick={() => router.push('/transactions')}
+                        className="bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 rounded-xl border border-emerald-500/30 p-4 cursor-pointer hover:scale-[1.02] transition-transform"
+                    >
                         <div className="text-emerald-400 text-sm">{t('รายการทั้งหมด', 'Total Transactions')}</div>
                         <div className="text-2xl font-bold text-white">{analysis?.totalTransactions || 0}</div>
                     </div>
-                    <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl border border-purple-500/30 p-4">
+                    <div
+                        onClick={() => setOverviewModalState('value')}
+                        className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl border border-purple-500/30 p-4 cursor-pointer hover:scale-[1.02] transition-transform"
+                    >
                         <div className="text-purple-400 text-sm">{t('มูลค่าพอร์ต', 'Portfolio Value')}</div>
                         <div className="text-2xl font-bold text-white">
                             {formatCurrency(convertToDisplayCurrency(portfolio?.summary.total_current_value || 0), displayCurrency)}
                         </div>
                     </div>
-                    <div className={`bg-gradient-to-br ${(portfolio?.summary.total_unrealized_pnl || 0) >= 0
-                        ? 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30'
-                        : 'from-rose-500/20 to-rose-600/10 border-rose-500/30'} rounded-xl border p-4`}>
+                    <div
+                        onClick={() => setOverviewModalState('pnl')}
+                        className={`bg-gradient-to-br ${(portfolio?.summary.total_unrealized_pnl || 0) >= 0
+                            ? 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30'
+                            : 'from-rose-500/20 to-rose-600/10 border-rose-500/30'} rounded-xl border p-4 cursor-pointer hover:scale-[1.02] transition-transform`}>
                         <div className={`text-sm ${(portfolio?.summary.total_unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {t('กำไร/ขาดทุน', 'Profit/Loss')}
                         </div>
@@ -759,6 +774,46 @@ export default function AnalysisPage() {
                             />
                         )}
                     </>
+                )}
+
+                {/* Overview Modal */}
+                {overviewModalState && analysis && (
+                    <AssetBreakdownModal
+                        title={
+                            overviewModalState === 'assets' ? t('สินทรัพย์ทั้งหมด (เรียงตามมูลค่า)', 'All Assets (by Value)') :
+                                overviewModalState === 'value' ? t('มูลค่าพอร์ต (เรียงตามมูลค่า)', 'Portfolio Value (by Value)') :
+                                    t('กำไร/ขาดทุน (Unrealized P&L)', 'Profit/Loss (Unrealized)')
+                        }
+                        type="all"
+                        subtitle={overviewModalState === 'pnl' ? t('แสดงรายการตาม Unrealized P&L', 'Showing Unrealized P&L') : undefined}
+                        useColorForValue={overviewModalState === 'pnl'}
+                        assets={(() => {
+                            if (!analysis) return [];
+
+                            // If calculating P&L
+                            if (overviewModalState === 'pnl') {
+                                return Object.values(analysis.assetsByBreakdownType).flat().map(a => {
+                                    // Use data from portfolio assets for updated P&L
+                                    const pAsset = portfolio?.assets.find(pa => pa.symbol === a.symbol && pa.asset_type === a.assetType);
+                                    const pnl = pAsset?.unrealized_pnl || 0;
+                                    const pnlThb = toBase(pnl, pAsset?.currency || 'THB');
+                                    return {
+                                        ...a,
+                                        value: pnlThb, // Override value with P&L for sorting
+                                        displayValue: convertToDisplayCurrency(pnlThb, 'THB')
+                                    };
+                                });
+                            }
+
+                            // Default (Assets/Value)
+                            return Object.values(analysis.assetsByBreakdownType).flat().map(a => ({
+                                ...a,
+                                displayValue: convertToDisplayCurrency(a.value, 'THB')
+                            }));
+                        })()}
+                        displayCurrency={displayCurrency}
+                        onClose={() => setOverviewModalState(null)}
+                    />
                 )}
 
                 {/* Account Analysis with Goal Progress */}
@@ -1333,7 +1388,7 @@ export default function AnalysisPage() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-700/30">
-                                        {portfolio?.assets.filter(a => a.asset_type === selectedAssetType).map(asset => {
+                                        {portfolio?.assets.filter(a => a.asset_type === selectedAssetType).map((asset, index) => {
                                             const multiplier = asset.asset_type === 'tfex' ? (asset.leverage || 1) : 1;
                                             const rawValue = asset.quantity * asset.current_price * multiplier;
 
@@ -1349,7 +1404,7 @@ export default function AnalysisPage() {
                                             }
 
                                             return (
-                                                <tr key={asset.symbol} className="hover:bg-gray-800/30">
+                                                <tr key={`${asset.symbol}-${index}`} className="hover:bg-gray-800/30">
                                                     <td className="px-4 py-3 font-medium text-white">
                                                         {asset.symbol} <span className="text-gray-500 text-xs ml-1">{asset.market}</span>
                                                     </td>

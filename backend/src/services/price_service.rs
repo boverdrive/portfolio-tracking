@@ -19,6 +19,14 @@ pub struct PriceEntry {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Historical price entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub date: String,
+    pub price: f64,
+}
+
+
 /// Response from api.chnwt.dev/thai-gold-api/latest
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
@@ -204,6 +212,130 @@ impl PriceService {
         }
         
         results
+    }
+
+    /// Get price history for a symbol
+    pub async fn get_price_history(
+        &self,
+        symbol: &str,
+        asset_type: &AssetType,
+        market: Option<&Market>,
+        days: u32,
+    ) -> Result<Vec<HistoryEntry>, AppError> {
+        let history = match asset_type {
+            AssetType::Crypto => self.fetch_crypto_history(symbol, market, days).await?,
+            AssetType::Stock | AssetType::ForeignStock | AssetType::Gold | AssetType::Tfex | AssetType::Commodity => 
+                self.fetch_yahoo_history(symbol, asset_type, market, days).await?,
+        };
+        Ok(history)
+    }
+
+    /// Fetch crypto history from Binance
+    async fn fetch_crypto_history(&self, symbol: &str, _market: Option<&Market>, days: u32) -> Result<Vec<HistoryEntry>, AppError> {
+        // Default to Binance Spot/Futures API
+        // Convert days to interval/limit
+        let interval = if days <= 1 { "5m" } else if days <= 7 { "1h" } else { "1d" };
+        let limit = if days <= 1 { 288 } else if days <= 7 { 168 } else { days };
+        
+        let symbol_upper = symbol.to_uppercase();
+        let pair = format!("{}USDT", symbol_upper); // Assuming USDT pairs for simplicity
+        
+        // Use Spot API by default
+        let url = format!(
+            "https://api.binance.com/api/v3/klines?symbol={}&interval={}&limit={}",
+            pair, interval, limit
+        );
+
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+             return Err(AppError::ExternalApiError("Binance history failed".to_string()));
+        }
+
+        let data: Vec<serde_json::Value> = response.json().await?;
+        let mut history = Vec::new();
+
+        for item in data {
+            if let Some(arr) = item.as_array() {
+                if arr.len() > 4 {
+                    let timestamp = arr[0].as_u64().unwrap_or(0);
+                    let close_price: f64 = arr[4].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                    
+                    let date = DateTime::from_timestamp_millis(timestamp as i64)
+                        .unwrap_or_default()
+                        .format("%Y-%m-%d")
+                        .to_string();
+                        
+                    history.push(HistoryEntry { date, price: close_price });
+                }
+            }
+        }
+        
+        Ok(history)
+    }
+
+    /// Fetch history from Yahoo Finance
+    async fn fetch_yahoo_history(
+        &self, 
+        symbol: &str, 
+        asset_type: &AssetType, 
+        _market: Option<&Market>, 
+        days: u32
+    ) -> Result<Vec<HistoryEntry>, AppError> {
+        // Determine Yahoo symbol
+        let y_symbol = match asset_type {
+            AssetType::Stock | AssetType::Tfex => format!("{}.BK", symbol.to_uppercase()),
+            AssetType::Gold => {
+                if symbol.to_uppercase() == "XAU" { "GC=F".to_string() } // Gold Futures
+                else { return Ok(vec![]) } // No history for local gold
+            }
+            AssetType::ForeignStock => symbol.to_uppercase(), // Usually direct symbol
+            AssetType::Commodity => {
+                // Map common commodity symbols
+               match symbol.to_uppercase().as_str() {
+                   "CL" => "CL=F".to_string(), // Crude Oil
+                   "NG" => "NG=F".to_string(), // Natural Gas
+                   _ => format!("{}=F", symbol.to_uppercase())
+               }
+            },
+             _ => symbol.to_uppercase()
+        };
+
+        // Yahoo Chart API: https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=1mo&interval=1d
+        let range = if days <= 7 { "5d" } else if days <= 30 { "1mo" } else if days <= 90 { "3mo" } else if days <= 180 { "6mo" } else if days <= 365 { "1y" } else { "2y" };
+        let interval = "1d";
+
+        let url = format!(
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval={}",
+            y_symbol, range, interval
+        );
+
+        let response = self.client.get(&url).send().await?;
+         if !response.status().is_success() {
+             return Err(AppError::ExternalApiError("Yahoo history failed".to_string()));
+        }
+
+        let data: serde_json::Value = response.json().await?;
+        
+        let mut history = Vec::new();
+        
+        if let Some(result) = data.get("chart").and_then(|c| c.get("result")).and_then(|r| r.as_array()).and_then(|a| a.first()) {
+             let timestamps = result.get("timestamp").and_then(|t| t.as_array());
+             let quotes = result.get("indicators").and_then(|i| i.get("quote")).and_then(|q| q.as_array()).and_then(|a| a.first()).and_then(|q| q.get("close")).and_then(|c| c.as_array());
+
+             if let (Some(ts), Some(qs)) = (timestamps, quotes) {
+                 for (t, q) in ts.iter().zip(qs.iter()) {
+                     if let (Some(timestamp), Some(price)) = (t.as_i64(), q.as_f64()) {
+                         let date = DateTime::from_timestamp(timestamp, 0)
+                            .unwrap_or_default()
+                            .format("%Y-%m-%d")
+                            .to_string();
+                         history.push(HistoryEntry { date, price });
+                     }
+                 }
+             }
+        }
+
+        Ok(history)
     }
 
     /// Fetch cryptocurrency price - uses market-specific API when available

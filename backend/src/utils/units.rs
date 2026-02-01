@@ -60,8 +60,10 @@ pub fn normalize_price(price: f64, unit: Option<&str>, asset_type: &AssetType, s
                 let u = unit.unwrap_or("baht").to_lowercase();
                  // If we have price per Salung, convert to Price per Baht
                  // Price/Baht = Price/Salung * 4
+                 // [FIX] Thai Gold is almost always quoted in Baht unit price even if buying Salung.
+                 // So we assume the user entered the Baht price (e.g. 40,000) not the Salung price (10,000).
                  if u == "salung" {
-                     return price * 4.0;
+                     return price;
                  }
                  // Price/Gram -> Price/Baht
                  // Price/Baht = Price/Gram * 15.244

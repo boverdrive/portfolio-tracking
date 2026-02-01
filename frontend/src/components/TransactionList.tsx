@@ -3,6 +3,7 @@
 import { Transaction, PortfolioResponse } from '@/types';
 import { formatCurrency, formatNumber, getAssetTypeName, DisplayCurrency, formatPercent, getEffectiveCurrency } from '@/lib/api';
 import { useSettings } from '@/contexts/SettingsContext';
+import { getUnitConversionFactor } from '@/lib/units';
 import AssetLogo from '@/components/AssetLogo';
 
 interface Props {
@@ -67,7 +68,8 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                 const displayLeverage = tx.leverage || 1;
                 // Determine effective currency (handle cases where API returns 'THB' for USDT pairs)
                 const effectiveTxCurrency = getEffectiveCurrency(tx, 'THB');
-                const totalValue = (tx.action === 'dividend') ? tx.price : (tx.quantity * tx.price * valueMultiplier);
+                const conversionFactor = getUnitConversionFactor(tx.unit, tx.asset_type, effectiveTxCurrency);
+                const totalValue = (tx.action === 'dividend') ? tx.price : (tx.quantity * tx.price * conversionFactor * valueMultiplier);
 
                 // P&L Calculation logic
                 let pnl = 0;
@@ -79,7 +81,7 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                 if (transactionMetrics && transactionMetrics[tx.id]) {
                     const metrics = transactionMetrics[tx.id];
                     const isOpening = tx.action === 'buy' || tx.action === 'long' || tx.action === 'short';
-                    const isClosing = tx.action === 'sell' || tx.action === 'close_long' || tx.action === 'close_short';
+                    const isClosing = tx.action === 'sell' || tx.action === 'close_long' || tx.action === 'close_short' || tx.action === 'liquidate_long' || tx.action === 'liquidate_short';
 
                     if (isClosing) {
                         // Closing actions = Realized P&L
@@ -131,6 +133,8 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                         case 'short': return { label: 'Short', color: 'bg-rose-500/20 text-rose-400' };
                         case 'close_long': return { label: t('ปิด Long', 'Close Long'), color: 'bg-amber-500/20 text-amber-400' };
                         case 'close_short': return { label: t('ปิด Short', 'Close Short'), color: 'bg-purple-500/20 text-purple-400' };
+                        case 'liquidate_long': return { label: t('Liquidated (Long)', 'Liquidated (Long)'), color: 'bg-red-500/20 text-red-500 font-bold border border-red-500/30' };
+                        case 'liquidate_short': return { label: t('Liquidated (Short)', 'Liquidated (Short)'), color: 'bg-red-500/20 text-red-500 font-bold border border-red-500/30' };
                         case 'dividend': return { label: t('รับปันผล', 'Dividend'), color: 'bg-amber-500/20 text-amber-400' };
                         case 'deposit': return { label: t('ฝาก', 'Deposit'), color: 'bg-emerald-500/20 text-emerald-400' };
                         case 'withdraw': return { label: t('ถอน', 'Withdraw'), color: 'bg-rose-500/20 text-rose-400' };
@@ -193,10 +197,6 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                                         const entryPrice = convertToDisplayCurrency ? convertToDisplayCurrency(tx.price, effectiveTxCurrency) : tx.price;
                                         const currentPrice = convertToDisplayCurrency ? convertToDisplayCurrency(asset.current_price, asset.currency) : asset.current_price;
 
-                                        const currentVal = tx.quantity * currentPrice * valueMultiplier; // Use converted current price for value calc? 
-                                        // No, currentVal logic below uses asset.currency, let's keep it consistent.
-                                        // Wait, currentVal block is separate (lines 195+). This block is for Entry/Current labels.
-
                                         return (
                                             <div className="flex flex-wrap gap-2 text-xs mt-1 font-medium">
                                                 <span className="text-gray-400">
@@ -228,7 +228,7 @@ export default function TransactionList({ transactions, portfolio, isLoading, on
                                     if (tx.action === 'dividend') return null;
                                     const asset = portfolio?.assets.find(a => a.symbol === tx.symbol && a.asset_type === tx.asset_type);
                                     if (asset?.current_price && (isPositive || (transactionMetrics?.[tx.id]?.remainingQty || 0) > 0)) {
-                                        const currentVal = tx.quantity * asset.current_price * valueMultiplier;
+                                        const currentVal = tx.quantity * asset.current_price * conversionFactor * valueMultiplier;
                                         return (
                                             <div className="text-xs text-blue-400 font-medium leading-none mb-1">
                                                 {convertToDisplayCurrency

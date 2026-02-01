@@ -3,11 +3,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Transaction, PortfolioResponse } from '@/types';
 import { getTransactions, getPortfolio, formatCurrency, formatNumber, getAssetTypeName, DisplayCurrency, getAllExchangeRates } from '@/lib/api';
+import { getUnitConversionFactor } from '@/lib/units';
 import { calculatePnlMetrics } from '@/lib/pnl-utils';
 import TransactionList from '@/components/TransactionList';
 import { useSettings } from '@/contexts/SettingsContext';
 import Header from '@/components/Header';
 import AssetLogo from '@/components/AssetLogo';
+import AssetPerformanceChart from '@/components/AssetPerformanceChart';
+import { PortfolioAsset } from '@/types';
 
 export default function ReportsPage() {
     const { t, settings, displayCurrency, setDisplayCurrency } = useSettings();
@@ -25,6 +28,9 @@ export default function ReportsPage() {
         type: 'tag' | 'card';
     } | null>(null);
     const [modalSort, setModalSort] = useState<'date' | 'asset' | 'pnl'>('date');
+
+    // Asset Performance Chart State
+    const [performanceAsset, setPerformanceAsset] = useState<PortfolioAsset | null>(null);
 
     const currencyOptions = [
         { value: 'THB' as const, icon: '🇹🇭' },
@@ -227,7 +233,11 @@ export default function ReportsPage() {
         filteredTransactions.forEach(tx => {
             const txTags = tx.tags?.length ? tx.tags : ['Untagged'];
             // Normalize value to Base Currency
-            const rawValue = tx.quantity * tx.price * (tx.leverage || 1);
+            const conversionFactor = getUnitConversionFactor(tx.unit, tx.asset_type, getEffectiveCurrency(tx));
+            const quantity = tx.quantity * conversionFactor;
+            // For TFEX, leverage = contract multiplier (affects value). For Crypto, it's just financial leverage.
+            const valueMultiplier = (tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
+            const rawValue = quantity * tx.price * valueMultiplier;
             const value = toBase(rawValue, getEffectiveCurrency(tx));
             const metrics = pnlMetrics[tx.id];
 
@@ -256,9 +266,11 @@ export default function ReportsPage() {
                         summary[tag].shorts += value;
                         break;
                     case 'close_long':
+                    case 'liquidate_long':
                         summary[tag].closeLongs += value;
                         break;
                     case 'close_short':
+                    case 'liquidate_short':
                         summary[tag].closeShorts += value;
                         break;
                     case 'close':
@@ -305,8 +317,19 @@ export default function ReportsPage() {
         };
 
         return filteredTransactions.reduce((acc, tx) => {
-            const rawValue = tx.quantity * tx.price * (tx.leverage || 1);
+            const conversionFactor = getUnitConversionFactor(tx.unit, tx.asset_type, getEffectiveCurrency(tx));
+            const quantity = tx.quantity * conversionFactor;
+            // For TFEX, leverage = contract multiplier (affects value). For Crypto, it's just financial leverage.
+            const valueMultiplier = (tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
+            const rawValue = quantity * tx.price * valueMultiplier;
             const value = toBase(rawValue, getEffectiveCurrency(tx));
+
+            // For Futures Active Totals (Long/Short), use Remaining Quantity
+            const metrics = pnlMetrics[tx.id];
+            const remainingQty = metrics ? metrics.remainingQty : quantity;
+            const rawRemainingValue = remainingQty * tx.price * valueMultiplier;
+            const remainingValue = toBase(rawRemainingValue, getEffectiveCurrency(tx));
+
 
             switch (tx.action) {
                 case 'buy':
@@ -316,13 +339,17 @@ export default function ReportsPage() {
                     acc.sells += value;
                     break;
                 case 'long':
-                    acc.longs += value;
+                    // Only add the Active (Remaining) Value to the Total
+                    acc.longs += remainingValue;
                     break;
                 case 'short':
-                    acc.shorts += value;
+                    // Only add the Active (Remaining) Value to the Total
+                    acc.shorts += remainingValue;
                     break;
                 case 'close_long':
                 case 'close_short':
+                case 'liquidate_long':
+                case 'liquidate_short':
                     acc.closes += value;
                     break;
             }
@@ -330,7 +357,64 @@ export default function ReportsPage() {
             acc.count += 1;
             return acc;
         }, { buys: 0, sells: 0, longs: 0, shorts: 0, closes: 0, fees: 0, count: 0 });
-    }, [filteredTransactions, exchangeRates, baseCurrency]);
+    }, [filteredTransactions, exchangeRates, baseCurrency, pnlMetrics]);
+
+    // Calculate Realized P&L locally to respect filters and include liquidations
+    const totalRealizedPnl = useMemo(() => {
+        // Helper to convert to Base Currency
+        const toBase = (amount: number, currency: string) => {
+            if (currency === baseCurrency) return amount;
+            const rate = exchangeRates[currency] || exchangeRates[currency.toUpperCase()];
+            return rate ? amount / rate : 0;
+        };
+
+        return filteredTransactions.reduce((acc, tx) => {
+            const metric = pnlMetrics[tx.id];
+            if (metric && metric.realizedPnl) {
+                // pnlMetrics are already in Base Currency (THB)
+                return acc + metric.realizedPnl;
+            }
+            return acc;
+        }, 0);
+    }, [filteredTransactions, pnlMetrics, exchangeRates, baseCurrency]);
+
+    // Calculate Unrealized P&L locally
+    const { totalUnrealizedPnl, totalUnrealizedPnlPercent } = useMemo(() => {
+        // Helper to convert to Base Currency
+        const toBase = (amount: number, currency: string) => {
+            if (currency === baseCurrency) return amount;
+            const rate = exchangeRates[currency] || exchangeRates[currency.toUpperCase()];
+            return rate ? amount / rate : 0;
+        };
+
+        let totalPnl = 0;
+        let totalCostBasis = 0;
+
+        filteredTransactions.forEach(tx => {
+            const metric = pnlMetrics[tx.id];
+            if (metric && !metric.isClosed && metric.unrealizedPnl !== undefined) {
+                // pnlMetrics are already in Base Currency (THB)
+                totalPnl += metric.unrealizedPnl;
+
+                // Estimate cost basis for this position to calculate percentage
+                // Cost = Price * RemainingQty * Multiplier
+                const conversionFactor = getUnitConversionFactor(tx.unit, tx.asset_type, getEffectiveCurrency(tx));
+                // Note: metric.remainingQty is already unit-adjusted if it came from our util, but let's double check.
+                // Actually pnl-utils usually stores raw qty or adjusted? 
+                // Let's assume metric.remainingQty matches the tx.quantity scale used in pnl-utils.
+                // In pnl-utils, we did: const quantity = tx.quantity * conversionFactor;
+                // So metric.remainingQty is already adjusted. 
+
+                const valueMultiplier = (tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
+                const cost = metric.remainingQty * tx.price * valueMultiplier;
+                totalCostBasis += toBase(cost, getEffectiveCurrency(tx));
+            }
+        });
+
+        const percent = totalCostBasis !== 0 ? (totalPnl / totalCostBasis) * 100 : 0;
+        return { totalUnrealizedPnl: totalPnl, totalUnrealizedPnlPercent: percent };
+
+    }, [filteredTransactions, pnlMetrics, exchangeRates, baseCurrency]);
 
     const toggleTag = (tag: string) => {
         setSelectedTags(prev =>
@@ -544,7 +628,7 @@ export default function ReportsPage() {
                         className="relative bg-gradient-to-br from-green-500/20 to-green-600/10 rounded-xl border border-green-500/30 p-4 min-h-[100px] overflow-hidden group cursor-pointer hover:bg-green-500/10 transition-all"
                         onClick={() => setModalState({
                             title: t('รายการ Long (Futures)', 'Long Positions (Futures)'),
-                            filter: (tx) => tx.action === 'long',
+                            filter: (tx) => tx.action === 'long' && !pnlMetrics[tx.id]?.isClosed,
                             type: 'card'
                         })}
                     >
@@ -564,7 +648,7 @@ export default function ReportsPage() {
                         className="relative bg-gradient-to-br from-red-500/20 to-red-600/10 rounded-xl border border-red-500/30 p-4 min-h-[100px] overflow-hidden group cursor-pointer hover:bg-red-500/10 transition-all"
                         onClick={() => setModalState({
                             title: t('รายการ Short (Futures)', 'Short Positions (Futures)'),
-                            filter: (tx) => tx.action === 'short',
+                            filter: (tx) => tx.action === 'short' && !pnlMetrics[tx.id]?.isClosed,
                             type: 'card'
                         })}
                     >
@@ -584,7 +668,7 @@ export default function ReportsPage() {
                         className="relative bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl border border-purple-500/30 p-4 min-h-[100px] overflow-hidden group cursor-pointer hover:bg-purple-500/10 transition-all"
                         onClick={() => setModalState({
                             title: t('รายการปิดสถานะ (Close Long/Short)', 'Closed Positions (Futures)'),
-                            filter: (tx) => tx.action === 'close_long' || tx.action === 'close_short',
+                            filter: (tx) => tx.action === 'close_long' || tx.action === 'close_short' || tx.action === 'liquidate_long' || tx.action === 'liquidate_short',
                             type: 'card'
                         })}
                     >
@@ -601,7 +685,7 @@ export default function ReportsPage() {
                     </div>
                     {/* Unrealized P&L */}
                     <div
-                        className={`relative bg-gradient-to-br ${(portfolio?.summary.total_unrealized_pnl || 0) >= 0
+                        className={`relative bg-gradient-to-br ${(totalUnrealizedPnl || 0) >= 0
                             ? 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30 hover:bg-emerald-500/10'
                             : 'from-rose-500/20 to-rose-600/10 border-rose-500/30 hover:bg-rose-500/10'} rounded-xl border p-4 min-h-[100px] overflow-hidden group cursor-pointer transition-all`}
                         onClick={() => setModalState({
@@ -614,27 +698,27 @@ export default function ReportsPage() {
                             type: 'card'
                         })}
                     >
-                        <div className={`absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity ${(portfolio?.summary.total_unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <div className={`absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity ${(totalUnrealizedPnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
                             </svg>
                         </div>
                         <div className="relative">
-                            <div className={`text-sm ${(portfolio?.summary.total_unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            <div className={`text-sm ${(totalUnrealizedPnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                                 {t('กำไรยังไม่รับรู้', 'Unrealized P&L')}
                             </div>
                             <div className="text-2xl font-bold text-white">
-                                {formatCurrency(convertToDisplayCurrency(portfolio?.summary.total_unrealized_pnl || 0), displayCurrency)}
+                                {formatCurrency(convertToDisplayCurrency(totalUnrealizedPnl || 0), displayCurrency)}
                             </div>
                             <div className="text-xs text-gray-500 mt-1">
-                                {(portfolio?.summary.total_unrealized_pnl_percent || 0) >= 0 ? '+' : ''}
-                                {(portfolio?.summary.total_unrealized_pnl_percent || 0).toFixed(2)}%
+                                {(totalUnrealizedPnlPercent || 0) >= 0 ? '+' : ''}
+                                {(totalUnrealizedPnlPercent || 0).toFixed(2)}%
                             </div>
                         </div>
                     </div>
                     {/* Realized P&L */}
                     <div
-                        className={`relative bg-gradient-to-br ${(portfolio?.summary.total_realized_pnl || 0) >= 0
+                        className={`relative bg-gradient-to-br ${(totalRealizedPnl || 0) >= 0
                             ? 'from-cyan-500/20 to-cyan-600/10 border-cyan-500/30 hover:bg-cyan-500/10'
                             : 'from-orange-500/20 to-orange-600/10 border-orange-500/30 hover:bg-orange-500/10'} rounded-xl border p-4 min-h-[100px] overflow-hidden group cursor-pointer transition-all`}
                         onClick={() => setModalState({
@@ -647,17 +731,17 @@ export default function ReportsPage() {
                             type: 'card'
                         })}
                     >
-                        <div className={`absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity ${(portfolio?.summary.total_realized_pnl || 0) >= 0 ? 'text-cyan-400' : 'text-orange-400'}`}>
+                        <div className={`absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity ${(totalRealizedPnl || 0) >= 0 ? 'text-cyan-400' : 'text-orange-400'}`}>
                             <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
                         <div className="relative">
-                            <div className={`text-sm ${(portfolio?.summary.total_realized_pnl || 0) >= 0 ? 'text-cyan-400' : 'text-orange-400'}`}>
+                            <div className={`text-sm ${(totalRealizedPnl || 0) >= 0 ? 'text-cyan-400' : 'text-orange-400'}`}>
                                 {t('กำไรรับรู้แล้ว', 'Realized P&L')}
                             </div>
                             <div className="text-2xl font-bold text-white">
-                                {formatCurrency(convertToDisplayCurrency(portfolio?.summary.total_realized_pnl || 0), displayCurrency)}
+                                {formatCurrency(convertToDisplayCurrency(totalRealizedPnl || 0), displayCurrency)}
                             </div>
                         </div>
                     </div>
@@ -777,6 +861,66 @@ export default function ReportsPage() {
                     </div>
                 )}
 
+                {/* Asset Performance Chart Section */}
+                <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                            📈 {t('กราฟราคาและทุนเฉลี่ย', 'Asset Performance Chart')}
+                        </h2>
+
+                        {/* Asset Selector */}
+                        <div className="relative">
+                            <select
+                                className="appearance-none bg-gray-700/50 border border-gray-600/50 rounded-lg pl-4 pr-10 py-2 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 min-w-[200px]"
+                                value={performanceAsset ? `${performanceAsset.symbol}|${performanceAsset.asset_type}|${performanceAsset.market || ''}` : ''}
+                                onChange={(e) => {
+                                    if (!e.target.value) {
+                                        setPerformanceAsset(null);
+                                        return;
+                                    }
+                                    const [symbol, type, market] = e.target.value.split('|');
+                                    const asset = portfolio?.assets.find(a =>
+                                        a.symbol === symbol &&
+                                        a.asset_type === type &&
+                                        (a.market || '') === market
+                                    );
+                                    setPerformanceAsset(asset || null);
+                                }}
+                            >
+                                <option value="">{t('เลือกสินทรัพย์...', 'Select Asset...')}</option>
+                                {portfolio?.assets.map((asset, idx) => {
+                                    const uniqueValue = `${asset.symbol}|${asset.asset_type}|${asset.market || ''}`;
+                                    const uniqueKey = `${uniqueValue}-${idx}`;
+
+                                    return (
+                                        <option key={uniqueKey} value={uniqueValue}>
+                                            {asset.symbol} ({getAssetTypeName(asset.asset_type, settings.language)}{asset.market ? ` - ${asset.market}` : ''})
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                            <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-gray-400">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                            </div>
+                        </div>
+                    </div>
+
+                    {performanceAsset ? (
+                        <AssetPerformanceChart
+                            asset={performanceAsset}
+                            displayCurrency={displayCurrency}
+                            onClose={() => setPerformanceAsset(null)}
+                        />
+                    ) : (
+                        <div className="text-center py-12 border-2 border-dashed border-gray-700/50 rounded-xl bg-gray-800/20">
+                            <svg className="w-16 h-16 mx-auto mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+                            </svg>
+                            <p className="text-gray-500">{t('กรุณาเลือกสินทรัพย์เพื่อดูกราฟ', 'Please select an asset to view performance chart')}</p>
+                        </div>
+                    )}
+                </div>
+
                 {/* Transactions List */}
                 <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden">
                     <div className="px-6 py-4 border-b border-gray-700/50">
@@ -794,8 +938,11 @@ export default function ReportsPage() {
                             {filteredTransactions.slice(0, 50).map(tx => {
                                 // Calculate P&L for open positions
                                 // Use P&L from metrics (which is normalized to Base Currency)
-                                const leverage = tx.leverage || 1;
-                                const cost = tx.quantity * tx.price * leverage;
+                                // For TFEX, leverage = contract multiplier (affects value). For Crypto, it's just financial leverage.
+                                const valueMultiplier = (tx.asset_type === 'tfex') ? (tx.leverage || 1) : 1;
+                                const conversionFactor = getUnitConversionFactor(tx.unit, tx.asset_type, getEffectiveCurrency(tx));
+                                const quantity = tx.quantity * conversionFactor;
+                                const cost = quantity * tx.price * valueMultiplier;
                                 const metric = pnlMetrics[tx.id];
 
                                 let pnl = 0;
@@ -823,9 +970,14 @@ export default function ReportsPage() {
                                         // Usually for "Unrealized P&L" on the list item, we show % relative to the *current holding cost*.
                                         const priceBase = toBase(tx.price, getEffectiveCurrency(tx));
                                         // Use remainingQty from metric to be precise about what generates this P&L
-                                        const costBasisBase = metric.remainingQty * priceBase * leverage;
+                                        const costBasisBase = metric.remainingQty * priceBase * valueMultiplier;
 
                                         pnlPercent = costBasisBase !== 0 ? (pnl / costBasisBase) * 100 : 0;
+
+                                        // For Crypto, if there is leverage, adjust P&L % to show ROE (Return on Equity) approximation
+                                        if (tx.asset_type === 'crypto' && (tx.leverage || 1) > 1) {
+                                            pnlPercent *= (tx.leverage || 1);
+                                        }
                                     } else if (Math.abs(metric.realizedPnl) > 0) {
                                         // Closed positions -> Realized P&L (if we want to show it? The previous code showed it for 'buy' only if not sold?)
                                         // The previous code only showed PnL for "buy/long/short" as unrealized.
@@ -968,13 +1120,32 @@ export default function ReportsPage() {
                                 />
                             </div>
 
-                            <div className="p-4 border-t border-gray-800 bg-gray-800/20 text-center text-sm text-gray-500">
-                                {filteredTransactions.filter(modalState.filter).length} {t('รายการ', 'transactions')}
+                            <div className="flex-none p-4 bg-gray-800 border-t border-gray-700 flex justify-between items-center text-sm">
+                                <span className="text-gray-400">{t('รวมทั้งหมด', 'Total Sum')}: {filteredTransactions.filter(modalState.filter).length} {t('รายการ', 'transactions')}</span>
+                                {(() => {
+                                    // Calculate total P&L for displayed items
+                                    const displayedTxs = filteredTransactions.filter(modalState.filter);
+                                    const totalVal = displayedTxs.reduce((sum, tx) => {
+                                        const m = pnlMetrics[tx.id];
+                                        if (!m) return sum;
+                                        // Use pure P&L from metrics (already THB)
+                                        const val = (m.isClosed) ? m.realizedPnl : m.unrealizedPnl;
+                                        return sum + (val || 0);
+                                    }, 0);
+
+                                    return (
+                                        <span className={`font-bold text-lg ${totalVal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                            {formatCurrency(convertToDisplayCurrency(totalVal), displayCurrency)}
+                                        </span>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>
-                )}
-            </main>
-        </div>
+
+                )
+                }
+            </main >
+        </div >
     );
 }

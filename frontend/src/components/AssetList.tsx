@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { PortfolioAsset, PortfolioResponse } from '@/types';
 import { formatCurrency, formatPercent, formatNumber, getAssetTypeName, getMarketName, DisplayCurrency } from '@/lib/api';
+import { getNextUnit, getUnitConversionFactor } from '@/lib/units';
 import { useSettings } from '@/contexts/SettingsContext';
 import AssetLogo from '@/components/AssetLogo';
 import AssetDetailsModal from '@/components/AssetDetailsModal';
@@ -21,8 +22,26 @@ type SortDirection = 'asc' | 'desc';
 
 export default function AssetList({ assets, portfolio, isLoading, displayCurrency = 'THB', convertToDisplayCurrency, onAssetSelect }: Props) {
     const { t, settings } = useSettings();
-    const [sortColumn, setSortColumn] = useState<SortColumn>('symbol');
-    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+    const [sortColumn, setSortColumn] = useState<SortColumn>('pnl');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+    // Track user unit preferences per asset (symbol -> unit)
+    const [unitOverrides, setUnitOverrides] = useState<Record<string, string>>({});
+
+    const handleUnitToggle = (e: React.MouseEvent, asset: PortfolioAsset) => {
+        e.stopPropagation(); // Prevent row click
+
+        // Only for Gold/Commodity
+        if (asset.asset_type !== 'gold' && asset.asset_type !== 'commodity') return;
+
+        const currentUnit = unitOverrides[asset.symbol] || asset.unit || 'baht'; // default local to baht if missing
+        const nextUnit = getNextUnit(currentUnit, asset.asset_type);
+
+        setUnitOverrides(prev => ({
+            ...prev,
+            [asset.symbol]: nextUnit
+        }));
+    };
 
     const formatValue = (value: number) => {
         if (displayCurrency === 'BTC') {
@@ -197,8 +216,52 @@ export default function AssetList({ assets, portfolio, isLoading, displayCurrenc
 
                             {/* Quantity */}
                             <div className="flex-1 text-right font-mono text-gray-300">
-                                {formatNumber(asset.quantity, asset.asset_type === 'crypto' ? 8 : 2)}
-                                {asset.unit && <span className="text-gray-500 text-xs ml-1">{asset.unit}</span>}
+                                {(() => {
+                                    // Determine display unit and quantity
+                                    // Backend stores Gold in "Baht" (usually) or "Oz" depending on base.
+                                    // We assume backend normalized quantity is in Base Unit.
+
+                                    const assetUnit = asset.unit || (asset.asset_type === 'gold' ? 'baht' : undefined);
+
+                                    // Check override
+                                    const displayUnit = unitOverrides[asset.symbol] || assetUnit;
+
+                                    let displayQuantity = asset.quantity;
+
+                                    // If we have a unit and it's different from base, or we just want to force conversion for display
+                                    if ((asset.asset_type === 'gold' || asset.asset_type === 'commodity') && displayUnit) {
+                                        // We need to convert FROM the stored unit TO the display unit.
+                                        // Stored Quantity is in Base Unit (logic in creating transaction normalized it everywhere?).
+                                        // Let's assume asset.quantity IS normalized.
+                                        // Wait, backend normalization means: quantities are stored as Baht (for THB gold) or Oz (for USD gold).
+                                        // So we just need to convert FROM Base TO Display.
+                                        // Factor = getUnitConversionFactor(DisplayUnit) relative to Base.
+                                        // Qty_Display * Factor = Qty_Base
+                                        // => Qty_Display = Qty_Base / Factor
+
+                                        const currency = asset.currency || 'THB';
+                                        const factor = getUnitConversionFactor(displayUnit, asset.asset_type, currency);
+
+                                        if (factor > 0) {
+                                            displayQuantity = asset.quantity / factor;
+                                        }
+                                    }
+
+                                    return (
+                                        <>
+                                            {formatNumber(displayQuantity, asset.asset_type === 'crypto' ? 8 : 2)}
+                                            {displayUnit && (
+                                                <span
+                                                    className={`text-gray-500 text-xs ml-1 ${(asset.asset_type === 'gold' || asset.asset_type === 'commodity') ? 'cursor-pointer hover:text-emerald-400 underline decoration-dotted' : ''}`}
+                                                    onClick={(e) => handleUnitToggle(e, asset)}
+                                                    title={t('คลิกเพื่อเปลี่ยนหน่วย', 'Click to toggle unit')}
+                                                >
+                                                    {displayUnit}
+                                                </span>
+                                            )}
+                                        </>
+                                    );
+                                })()}
                             </div>
 
                             {/* Average Cost + Fees */}

@@ -47,11 +47,14 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Portfolio Tracking needs to access your local network to connect to the backend server.</string>
-	<key>NSBonjourServices</key>
+	<key>CFBundleURLTypes</key>
 	<array>
-		<string>_http._tcp</string>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array/>
+			<key>CFBundleURLName</key>
+			<string>https</string>
+		</dict>
 	</array>
 </dict>
 </plist>

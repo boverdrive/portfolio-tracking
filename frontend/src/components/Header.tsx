@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
 import { useSettings } from '@/contexts/SettingsContext';
+import NotificationBell from './NotificationBell';
 
 interface HeaderProps {
     currentPage?: 'home' | 'transactions' | 'reports' | 'analysis' | 'settings' | 'profile';
@@ -116,6 +117,11 @@ export default function Header({
                                 </Link>
                             )
                         ))}
+
+                        {/* Notification Bell */}
+                        {isAuthenticated && (
+                            <NotificationBell />
+                        )}
 
                         {/* Profile dropdown */}
                         {isAuthenticated && (

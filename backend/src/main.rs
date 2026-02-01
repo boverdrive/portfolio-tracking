@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::Config;
-use services::{PocketBaseClient, PriceService, ExchangeRateService, AuthService, JobScheduler, SymbolsService, RateLimiter};
+use services::{PocketBaseClient, PriceService, ExchangeRateService, AuthService, JobScheduler, SymbolsService, RateLimiter, NotificationService, AlertService};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -27,6 +27,8 @@ pub struct AppState {
     pub job_scheduler: JobScheduler,
     pub symbols_service: SymbolsService,
     pub rate_limiter: RateLimiter,
+    pub notification_service: NotificationService,
+    pub alert_service: AlertService,
     pub config: Arc<Config>,
 }
 
@@ -85,7 +87,20 @@ async fn main() {
     let auth_service = AuthService::new(config.clone(), db.clone()).await;
     let job_scheduler = JobScheduler::new(config.clone(), db.clone(), price_service.clone());
     let symbols_service = SymbolsService::new(config.pocketbase_url.clone(), db.clone());
-
+    
+    // Initialize notification and alert services
+    let notification_service = NotificationService::new(config.clone(), db.clone());
+    let alert_service = AlertService::new(
+        config.clone(),
+        db.clone(),
+        notification_service.clone(),
+        price_service.clone(),
+    );
+    
+    // Initialize alert service (load alerts from database)
+    if let Err(e) = alert_service.initialize().await {
+        tracing::warn!("Failed to initialize alert service: {}", e);
+    }
     
     // Initialize job scheduler (load jobs from database)
     if let Err(e) = job_scheduler.initialize().await {
@@ -103,6 +118,8 @@ async fn main() {
         job_scheduler,
         symbols_service,
         rate_limiter,
+        notification_service,
+        alert_service,
         config: Arc::new(config.clone()),
     };
 
@@ -145,6 +162,7 @@ async fn main() {
         
         // Price routes
         .route("/api/prices/:symbol", get(handlers::get_price))
+        .route("/api/prices/history/:symbol", get(handlers::get_price_history))
         .route("/api/prices/batch", post(handlers::get_prices_batch))
         .route("/api/prices/cache/clear", post(handlers::clear_price_cache))
         
@@ -205,6 +223,24 @@ async fn main() {
         // Seed data routes
         .route("/api/seed/upload", post(handlers::upload_seed))
         .route("/api/seed/export", get(handlers::export_seed))
+        
+        // Alert routes
+        .route("/api/alerts", get(handlers::list_alerts))
+        .route("/api/alerts", post(handlers::create_alert))
+        .route("/api/alerts/history", get(handlers::get_alert_history))
+        .route("/api/alerts/evaluate", post(handlers::evaluate_alerts))
+        .route("/api/alerts/:id", get(handlers::get_alert))
+        .route("/api/alerts/:id", put(handlers::update_alert))
+        .route("/api/alerts/:id", delete(handlers::delete_alert))
+        
+        // Notification routes
+        .route("/api/notifications", get(handlers::get_notifications))
+        .route("/api/notifications/read-all", post(handlers::mark_all_notifications_read))
+        .route("/api/notifications/test", post(handlers::send_test_notification))
+        .route("/api/notifications/:id/read", post(handlers::mark_notification_read))
+        
+        // Push subscription routes
+        .route("/api/push/subscribe", post(handlers::subscribe_push))
         
         // Add middleware
 

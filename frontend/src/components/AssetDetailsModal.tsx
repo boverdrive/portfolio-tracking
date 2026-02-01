@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { PortfolioAsset, Transaction, PortfolioResponse } from '@/types';
 import { useSettings } from '@/contexts/SettingsContext';
 import { getTransactions, formatCurrency, formatNumber, getAssetTypeName, DisplayCurrency, getAllExchangeRates, getMarketName, getEffectiveCurrency } from '@/lib/api';
+import { getUnitConversionFactor } from '@/lib/units';
 import AssetLogo from '@/components/AssetLogo';
 import TransactionList from '@/components/TransactionList';
 
@@ -101,6 +102,11 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
 
             // Normalize transaction price to Asset's currency for FIFO matching
             const targetAssetCurrency = asset.currency || 'USD';
+
+            // Apply unit conversion correction
+            const conversionFactor = getUnitConversionFactor(tx.unit, asset.asset_type, targetAssetCurrency);
+            const quantity = tx.quantity * conversionFactor;
+
             const priceInAssetCurr = convert(tx.price, txCurrency, targetAssetCurrency);
             const currentPrice = asset.current_price || 0;
 
@@ -108,21 +114,21 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
             const toBasePnl = (pnlInAssetCurr: number) => convert(pnlInAssetCurr, targetAssetCurrency, settings.defaultCurrency);
 
             if (tx.action === 'buy' || tx.action === 'long') {
-                holdingsQueue.push({ qty: tx.quantity, price: priceInAssetCurr, id: tx.id });
+                holdingsQueue.push({ qty: quantity, price: priceInAssetCurr, id: tx.id });
                 metrics[tx.id] = {
-                    remainingQty: tx.quantity,
-                    unrealizedPnl: toBasePnl((currentPrice - priceInAssetCurr) * tx.quantity * multiplier)
+                    remainingQty: quantity,
+                    unrealizedPnl: toBasePnl((currentPrice - priceInAssetCurr) * quantity * multiplier)
                 };
             }
             else if (tx.action === 'short') {
-                holdingsQueue.push({ qty: tx.quantity, price: priceInAssetCurr, id: tx.id });
+                holdingsQueue.push({ qty: quantity, price: priceInAssetCurr, id: tx.id });
                 metrics[tx.id] = {
-                    remainingQty: tx.quantity,
-                    unrealizedPnl: toBasePnl((priceInAssetCurr - currentPrice) * tx.quantity * multiplier)
+                    remainingQty: quantity,
+                    unrealizedPnl: toBasePnl((priceInAssetCurr - currentPrice) * quantity * multiplier)
                 };
             }
             else if (tx.action === 'sell' || tx.action === 'close_long') {
-                let remainingToSell = tx.quantity;
+                let remainingToSell = quantity;
                 let totalRealizedPnlAssetCurr = 0;
 
                 while (remainingToSell > 0 && holdingsQueue.length > 0) {
@@ -144,7 +150,7 @@ export default function AssetDetailsModal({ asset, portfolio, displayCurrency = 
                 metrics[tx.id] = { realizedPnl: toBasePnl(totalRealizedPnlAssetCurr) };
             }
             else if (tx.action === 'close_short') {
-                let remainingToCover = tx.quantity;
+                let remainingToCover = quantity;
                 let totalRealizedPnlAssetCurr = 0;
 
                 while (remainingToCover > 0 && holdingsQueue.length > 0) {

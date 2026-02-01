@@ -51,6 +51,8 @@ const getCurrentDateTimeLocal = () => {
     return now.toISOString().slice(0, 16);
 };
 
+import { getUnitConversionFactor } from '@/lib/units';
+
 // Convert ISO date to local datetime format
 const toLocalDateTimeFormat = (isoDate: string) => {
     const date = new Date(isoDate);
@@ -103,7 +105,8 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
     const [isFuturesMode, setIsFuturesMode] = useState(() =>
         !!(editTransaction && editTransaction.asset_type === 'crypto' &&
             (editTransaction.action === 'long' || editTransaction.action === 'short' ||
-                editTransaction.action === 'close_long' || editTransaction.action === 'close_short'))
+                editTransaction.action === 'close_long' || editTransaction.action === 'close_short' ||
+                editTransaction.action === 'liquidate_long' || editTransaction.action === 'liquidate_short'))
     );
     const [leverageStr, setLeverageStr] = useState(() => {
         if (editTransaction) {
@@ -120,7 +123,12 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
     const [isTransferMode, setIsTransferMode] = useState(false);
 
     // Toggle Transfer Mode
+    const isFirstRender = useRef(true);
     useEffect(() => {
+        if (isFirstRender.current) {
+            isFirstRender.current = false;
+            return;
+        }
         if (isTransferMode) {
             setFormData(prev => ({ ...prev, action: 'transfer' }));
         } else {
@@ -241,7 +249,8 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
             // Set futures mode for crypto
             if (editTransaction.asset_type === 'crypto') {
                 const isFutures = editTransaction.action === 'long' || editTransaction.action === 'short' ||
-                    editTransaction.action === 'close_long' || editTransaction.action === 'close_short';
+                    editTransaction.action === 'close_long' || editTransaction.action === 'close_short' ||
+                    editTransaction.action === 'liquidate_long' || editTransaction.action === 'liquidate_short';
                 setIsFuturesMode(isFutures);
             } else {
                 setIsFuturesMode(false);
@@ -487,6 +496,8 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                 { value: 'short', label: t('Open Short', 'Open Short') },
                 { value: 'close_long', label: t('Close Long', 'Close Long') },
                 { value: 'close_short', label: t('Close Short', 'Close Short') },
+                { value: 'liquidate_long', label: t('Force Close/Liquidate (Long)', 'Force Close/Liquidate (Long)') },
+                { value: 'liquidate_short', label: t('Force Close/Liquidate (Short)', 'Force Close/Liquidate (Short)') },
             ];
         }
         return [
@@ -1164,7 +1175,12 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                                         setOrderAmountStr(val);
                                                         const amount = parseFloat(val);
                                                         if (!isNaN(amount) && formData.price > 0) {
-                                                            const qty = amount / formData.price;
+                                                            // Calculate Quantity from Total Amount
+                                                            // Total = Quantity * Conversion * Price
+                                                            // Quantity = Total / (Price * Conversion)
+                                                            const conversion = getUnitConversionFactor(formData.unit, formData.asset_type, formData.currency || 'THB');
+                                                            const qty = amount / (formData.price * conversion);
+
                                                             setQuantityStr(qty.toFixed(8));
                                                             setFormData(prev => ({ ...prev, quantity: qty }));
                                                         }
@@ -1288,7 +1304,7 @@ export default function TransactionForm({ onSuccess, onClose, defaultAccountId, 
                                         )}
                                     </span>
                                     <span className="text-white font-semibold font-mono">
-                                        {formData.currency} {((formData.quantity * formData.price) * (formData.leverage || 1)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                        {formData.currency} {((formData.quantity * formData.price * getUnitConversionFactor(formData.unit, formData.asset_type, formData.currency || 'THB')) * (formData.leverage || 1)).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                                     </span>
                                 </div>
                             </div>

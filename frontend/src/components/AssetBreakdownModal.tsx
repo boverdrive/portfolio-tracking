@@ -23,9 +23,11 @@ interface Props {
     assets: BreakdownAsset[];
     displayCurrency: string;
     onClose: () => void;
+    subtitle?: string;
+    useColorForValue?: boolean;
 }
 
-export default function AssetBreakdownModal({ title, type, assets, displayCurrency, onClose }: Props) {
+export default function AssetBreakdownModal({ title, type, assets, displayCurrency, onClose, subtitle, useColorForValue }: Props) {
     const { t, settings } = useSettings();
 
     // Sort by value descending
@@ -53,16 +55,16 @@ export default function AssetBreakdownModal({ title, type, assets, displayCurren
 
                 <div className="p-4 bg-gray-750/30 border-b border-gray-700/50">
                     <p className="text-xs text-gray-400">
-                        {isFuturesType(type)
+                        {subtitle ? subtitle : (isFuturesType(type)
                             ? t('แสดงยอดจาก Initial Margin (เงินหลักประกัน)', 'Showing Initial Margin value')
                             : t('แสดงยอดจากมูลค่าตลาดปัจจุบัน', 'Showing Current Market Value')
-                        }
+                        )}
                     </p>
                 </div>
 
                 <div className="p-2 max-h-[60vh] overflow-y-auto">
-                    {sortedAssets.map(asset => (
-                        <div key={asset.symbol} className="flex items-center justify-between p-3 hover:bg-gray-700/30 rounded-lg transition-colors group">
+                    {sortedAssets.map((asset, index) => (
+                        <div key={`${asset.symbol}-${index}`} className="flex items-center justify-between p-3 hover:bg-gray-700/30 rounded-lg transition-colors group">
                             <div className="flex items-center gap-3">
                                 <AssetLogo symbol={asset.symbol} assetType={asset.assetType === 'crypto_futures' ? 'crypto' : asset.assetType} size="sm" />
                                 <div>
@@ -76,7 +78,11 @@ export default function AssetBreakdownModal({ title, type, assets, displayCurren
                                 </div>
                             </div>
                             <div className="text-right">
-                                <div className="font-mono text-white text-sm font-bold">
+                                <div className={`font-mono text-sm font-bold ${useColorForValue
+                                    ? (asset.displayValue >= 0 ? 'text-emerald-400' : 'text-rose-400')
+                                    : 'text-white'
+                                    }`}>
+                                    {useColorForValue && asset.displayValue > 0 ? '+' : ''}
                                     {formatCurrency(asset.displayValue, displayCurrency)}
                                 </div>
                             </div>

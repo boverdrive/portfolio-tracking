@@ -4,6 +4,7 @@ pub mod user;
 pub mod account;
 pub mod job;
 pub mod api_provider;
+pub mod alert;
 
 pub use transaction::*;
 pub use asset::*;
@@ -11,3 +12,5 @@ pub use user::*;
 pub use account::*;
 pub use job::*;
 pub use api_provider::*;
+pub use alert::*;
+

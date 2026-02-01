@@ -318,6 +318,12 @@ impl PocketBaseClient {
         if let Some(initial_margin) = req.initial_margin {
             transaction.initial_margin = Some(initial_margin);
         }
+        if let Some(market) = req.market {
+            transaction.market = Some(market);
+        }
+        if let Some(unit) = req.unit {
+            transaction.unit = Some(unit);
+        }
         
         transaction.updated_at = Utc::now();
         let updated = transaction.clone();

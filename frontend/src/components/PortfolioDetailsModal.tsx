@@ -49,21 +49,31 @@ export default function PortfolioDetailsModal({ metric, summary, assets, display
             }
 
             return (
-                <div className="space-y-4">
-                    <div className="text-sm text-gray-400 mb-2">{t('แยกตามสกุลเงินต้นทาง', 'Breakdown by Original Currency')}</div>
-                    {hasBreakdown ? Object.entries(breakdown).map(([currency, amount]) => (
-                        <div key={currency} className="flex justify-between items-center border-b border-gray-700/50 pb-2 last:border-0">
-                            <span className="font-medium text-gray-300">{currency}</span>
-                            <span className={`font-mono ${amount >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {formatCurrency(amount, currency as any)}
-                            </span>
-                        </div>
-                    )) : (
-                        <div className="text-gray-400 text-sm">
-                            {t('แสดงยอดรวมจากการคำนวณแบบเก่า', 'Showing total from legacy calculation')}
-                        </div>
-                    )}
-                </div>
+                <>
+                    <div className="space-y-4">
+                        <div className="text-sm text-gray-400 mb-2">{t('แยกตามสกุลเงินต้นทาง', 'Breakdown by Original Currency')}</div>
+                        {hasBreakdown ? Object.entries(breakdown).map(([currency, amount]) => (
+                            <div key={currency} className="flex justify-between items-center border-b border-gray-700/50 pb-2 last:border-0">
+                                <span className="font-medium text-gray-300">{currency}</span>
+                                <span className={`font-mono ${amount >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {formatCurrency(amount, currency as any)}
+                                </span>
+                            </div>
+                        )) : (
+                            <div className="text-gray-400 text-sm">
+                                {t('แสดงยอดรวมจากการคำนวณแบบเก่า', 'Showing total from legacy calculation')}
+                            </div>
+                        )}
+                    </div>
+                    <div className="pt-4 border-t border-gray-700/50 text-center">
+                        <a href="/reports" className="text-sm text-blue-400 hover:text-blue-300 flex items-center justify-center gap-1 transition-colors">
+                            <span>{t('ดูรายการทั้งหมดในรายงาน', 'View full details in Reports')}</span>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                        </a>
+                    </div>
+                </>
             );
         }
 

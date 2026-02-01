@@ -127,6 +127,8 @@ pub enum TradeAction {
     Short,
     CloseLong,
     CloseShort,
+    LiquidateLong,
+    LiquidateShort,
     Dividend,
     Deposit,
     Withdraw,

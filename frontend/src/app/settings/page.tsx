@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
+import AlertSettings from '@/components/AlertSettings';
 import { useSettings, MarketConfig } from '@/contexts/SettingsContext';
 import { useAuth } from '@/lib/auth';
 import { getApiBaseUrl } from '@/lib/api';
@@ -1322,7 +1323,7 @@ function ApiLogsSettings() {
     );
 }
 
-type SettingsSection = 'general' | 'language' | 'currency' | 'assets' | 'markets' | 'exchange' | 'prices' | 'jobs' | 'api_logs' | 'system';
+type SettingsSection = 'general' | 'language' | 'currency' | 'assets' | 'markets' | 'exchange' | 'prices' | 'jobs' | 'api_logs' | 'alerts' | 'system';
 
 export default function SettingsPage() {
     const { t } = useSettings();
@@ -1339,6 +1340,7 @@ export default function SettingsPage() {
         { id: 'prices', label: t('จัดการราคา', 'Manage Prices'), icon: '📈', description: t('ดูและจัดการราคาสินทรัพย์', 'View and manage asset prices'), isLink: true, href: '/settings/prices' },
         { id: 'jobs', label: t('Background Jobs', 'Background Jobs'), icon: '🔄', description: t('ตั้งเวลาดึงข้อมูลอัตโนมัติ', 'Schedule automatic data fetching'), isLink: true, href: '/settings/jobs' },
         { id: 'api_logs', label: t('API Logs', 'API Logs'), icon: '📊', description: t('ดูบันทึกการเรียก API', 'View API call logs') },
+        { id: 'alerts', label: t('การแจ้งเตือน', 'Alerts'), icon: '🔔', description: t('ตั้งค่าการแจ้งเตือนราคาและพอร์ต', 'Set up price and portfolio alerts') },
         { id: 'system', label: t('ระบบ', 'System'), icon: '🔧', description: t('ตั้งค่าระบบและ Seed Data', 'System settings & seed data') },
     ];
 
@@ -1358,6 +1360,8 @@ export default function SettingsPage() {
                 return <ExchangeRateSettings />;
             case 'api_logs':
                 return <ApiLogsSettings />;
+            case 'alerts':
+                return <AlertSettings />;
             case 'system':
                 return (
                     <>

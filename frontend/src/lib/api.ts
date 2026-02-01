@@ -447,7 +447,23 @@ export async function seedSymbols(): Promise<SeedResponse> {
     });
 }
 
-// ==================== Portfolio Snapshots API ====================
+// ==================== Price History API ====================
+
+export interface HistoryEntry {
+    date: string;
+    price: number;
+}
+
+export async function getPriceHistory(symbol: string, assetType: string, market?: string, days: number = 30): Promise<HistoryEntry[]> {
+    const params = new URLSearchParams({
+        asset_type: assetType,
+        days: days.toString()
+    });
+    if (market) params.append('market', market);
+
+    return fetchApi<HistoryEntry[]>(`/api/prices/history/${symbol}?${params.toString()}`);
+}
+
 
 export interface PortfolioSnapshotAsset {
     symbol: string;
@@ -593,3 +609,176 @@ export async function getApiLogs(page: number = 1, perPage: number = 50): Promis
 export async function getApiStats(): Promise<ApiCallStats[]> {
     return fetchApi<ApiCallStats[]>('/api/logs/stats');
 }
+
+// ==================== Alert API ====================
+
+export type AlertType =
+    | 'price_above'
+    | 'price_below'
+    | 'pnl_threshold_percent'
+    | 'pnl_threshold_absolute'
+    | 'portfolio_change_percent'
+    | 'daily_pnl_report';
+
+export type Comparison = 'above' | 'below' | 'equals';
+
+export type NotificationChannel = 'email' | 'web_push' | 'in_app';
+
+export interface AlertRule {
+    id: string;
+    user_id: string;
+    name: string;
+    alert_type: AlertType;
+    symbol?: string;
+    threshold: number;
+    comparison: Comparison;
+    channels: NotificationChannel[];
+    is_active: boolean;
+    cooldown_minutes: number;
+    last_triggered?: string;
+    created: string;
+    updated: string;
+}
+
+export interface CreateAlertRequest {
+    name: string;
+    alert_type: AlertType;
+    symbol?: string;
+    threshold: number;
+    comparison: Comparison;
+    channels: NotificationChannel[];
+    cooldown_minutes?: number;
+}
+
+export interface UpdateAlertRequest {
+    name?: string;
+    threshold?: number;
+    comparison?: Comparison;
+    channels?: NotificationChannel[];
+    is_active?: boolean;
+    cooldown_minutes?: number;
+}
+
+export interface AlertHistory {
+    id: string;
+    alert_id: string;
+    user_id: string;
+    triggered_at: string;
+    message: string;
+    channels_sent: NotificationChannel[];
+    value_at_trigger: number;
+}
+
+export async function getAlerts(): Promise<AlertRule[]> {
+    return fetchApi<AlertRule[]>('/api/alerts');
+}
+
+export async function getAlert(id: string): Promise<AlertRule> {
+    return fetchApi<AlertRule>(`/api/alerts/${id}`);
+}
+
+export async function createAlert(data: CreateAlertRequest): Promise<AlertRule> {
+    return fetchApi<AlertRule>('/api/alerts', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function updateAlert(id: string, data: UpdateAlertRequest): Promise<AlertRule> {
+    return fetchApi<AlertRule>(`/api/alerts/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function deleteAlert(id: string): Promise<void> {
+    await fetchApi(`/api/alerts/${id}`, {
+        method: 'DELETE',
+    });
+}
+
+export async function getAlertHistory(limit: number = 50): Promise<AlertHistory[]> {
+    return fetchApi<AlertHistory[]>(`/api/alerts/history?limit=${limit}`);
+}
+
+export async function evaluateAlerts(): Promise<{ evaluated: number; triggered: number }> {
+    return fetchApi('/api/alerts/evaluate', {
+        method: 'POST',
+    });
+}
+
+// ==================== Notification API ====================
+
+export type NotificationType = 'alert' | 'info' | 'system' | 'warning';
+
+export interface Notification {
+    id: string;
+    user_id: string;
+    title: string;
+    body: string;
+    notification_type: NotificationType;
+    is_read: boolean;
+    metadata?: Record<string, unknown>;
+    created: string;
+}
+
+export async function getNotifications(): Promise<Notification[]> {
+    return fetchApi<Notification[]>('/api/notifications');
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+    await fetchApi(`/api/notifications/${id}/read`, {
+        method: 'POST',
+    });
+}
+
+export async function markAllNotificationsRead(): Promise<{ marked_read: number }> {
+    return fetchApi('/api/notifications/read-all', {
+        method: 'POST',
+    });
+}
+
+export async function sendTestNotification(): Promise<{ success: boolean; message: string }> {
+    return fetchApi('/api/notifications/test', {
+        method: 'POST',
+    });
+}
+
+// ==================== Push Subscription API ====================
+
+export interface PushSubscriptionRequest {
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+}
+
+export async function subscribePush(data: PushSubscriptionRequest): Promise<{ id: string; message: string }> {
+    return fetchApi('/api/push/subscribe', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+// Helper to get alert type display name
+export function getAlertTypeName(type: AlertType, language: string = 'th'): string {
+    const names: Record<AlertType, { th: string; en: string }> = {
+        price_above: { th: 'ราคาสูงกว่า', en: 'Price Above' },
+        price_below: { th: 'ราคาต่ำกว่า', en: 'Price Below' },
+        pnl_threshold_percent: { th: 'กำไร/ขาดทุน (%)', en: 'P&L Threshold (%)' },
+        pnl_threshold_absolute: { th: 'กำไร/ขาดทุน (฿)', en: 'P&L Threshold (฿)' },
+        portfolio_change_percent: { th: 'พอร์ตเปลี่ยนแปลง (%)', en: 'Portfolio Change (%)' },
+        daily_pnl_report: { th: 'สรุปรายวัน', en: 'Daily Report' },
+    };
+    return names[type]?.[language === 'th' ? 'th' : 'en'] || type;
+}
+
+// Helper to get channel display name
+export function getChannelName(channel: NotificationChannel, language: string = 'th'): string {
+    const names: Record<NotificationChannel, { th: string; en: string }> = {
+        email: { th: 'อีเมล', en: 'Email' },
+        web_push: { th: 'Browser Push', en: 'Browser Push' },
+        in_app: { th: 'In-App', en: 'In-App' },
+    };
+    return names[channel]?.[language === 'th' ? 'th' : 'en'] || channel;
+}
+

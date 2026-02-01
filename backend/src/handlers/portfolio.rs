@@ -52,14 +52,15 @@ pub async fn get_portfolio(
     // Group transactions by symbol+type+market and calculate holdings
     let mut holdings: HashMap<String, PortfolioAsset> = HashMap::new();
     let mut realized_pnl = 0.0; // Keep for backward compatibility (sum of all raw values)
+    let mut total_dividend = 0.0; // Track total dividends across all assets (active + closed)
     let mut realized_pnl_breakdown: HashMap<String, f64> = HashMap::new();
     
     for tx in &sorted_transactions {
         // Determine position "bucket" to support Hedge Mode (separating Spot, Long, Short)
         let position_bucket = match tx.action {
             TradeAction::Buy | TradeAction::Sell => "spot",
-            TradeAction::Long | TradeAction::CloseLong => "long",
-            TradeAction::Short | TradeAction::CloseShort => "short",
+            TradeAction::Long | TradeAction::CloseLong | TradeAction::LiquidateLong => "long",
+            TradeAction::Short | TradeAction::CloseShort | TradeAction::LiquidateShort => "short",
             TradeAction::Dividend => "spot",
             TradeAction::Deposit | TradeAction::Withdraw => "spot",
         };
@@ -165,12 +166,17 @@ pub async fn get_portfolio(
                 asset.total_fees += tx.fees;
                 asset.quantity = new_quantity;
             }
-            TradeAction::Sell | TradeAction::CloseLong => {
+            TradeAction::Sell | TradeAction::CloseLong | TradeAction::LiquidateLong => {
                 // Sell, CloseLong - close long position
                 if asset.quantity > 0.0 {
                     // Realized PnL Calculation
-                    let sell_value = tx_quantity * tx_price - tx.fees;
-                    let cost_basis = tx_quantity * asset.avg_cost; // Notional Cost (Entry Price * Qty)
+                    // Realized PnL Calculation
+                    // For TFEX/Futures, we must apply the multiplier (stored in asset.leverage)
+                    let multiplier = if asset.asset_type == AssetType::Tfex { asset.leverage } else { 1.0 };
+                    
+                    // Value = Price * Qty * Multiplier
+                    let sell_value = (tx_quantity * tx_price * multiplier) - tx.fees;
+                    let cost_basis = tx_quantity * asset.avg_cost * multiplier; // Notional Cost
                     
                     // Reduce quantity
                     let ratio = tx_quantity / asset.quantity;
@@ -223,11 +229,13 @@ pub async fn get_portfolio(
                     asset.quantity -= ratio * asset.quantity.abs(); 
                 }
             }
-            TradeAction::CloseShort => {
+            TradeAction::CloseShort | TradeAction::LiquidateShort => {
                 // CloseShort - buy to close short position
                 if asset.quantity < 0.0 {
-                    let buy_cost = tx_quantity * tx_price + tx.fees; // Cost to close
-                    let short_value = tx_quantity * asset.avg_cost;  // Price we sold at * qty
+                    let multiplier = if asset.asset_type == AssetType::Tfex { asset.leverage } else { 1.0 };
+                    
+                    let buy_cost = (tx_quantity * tx_price * multiplier) + tx.fees; // Cost to close
+                    let short_value = tx_quantity * asset.avg_cost * multiplier;  // Price we sold at * qty
                     
                     // Reduce negative quantity (towards 0)
                     let ratio = tx_quantity / asset.quantity.abs();
@@ -265,6 +273,7 @@ pub async fn get_portfolio(
                 
                 // Dividends are technically realized gains, but we track them separate from Capital Gains PnL
                 // If we want total return, we sum them up in UI
+                total_dividend += amount;
             }
         }
     }
@@ -391,6 +400,7 @@ pub async fn get_portfolio(
     // Calculate portfolio summary
     let mut summary = PortfolioSummary::new();
     summary.total_realized_pnl = realized_pnl;
+    summary.total_dividend = total_dividend; // Use the global accumulator
     summary.realized_pnl_breakdown = realized_pnl_breakdown;
     summary.assets_count = active_holdings.len();
     
@@ -398,7 +408,7 @@ pub async fn get_portfolio(
         summary.total_invested += asset.total_cost;
         summary.total_current_value += asset.current_value;
         summary.total_unrealized_pnl += asset.unrealized_pnl;
-        summary.total_dividend += asset.realized_dividend;
+        // Dividend already calculated globally
     }
     
     summary.calculate_percent();

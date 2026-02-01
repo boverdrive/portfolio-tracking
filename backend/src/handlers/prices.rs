@@ -27,6 +27,14 @@ pub struct BatchPriceSymbol {
     pub market: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GetHistoryQuery {
+    pub asset_type: String,
+    pub market: Option<String>,
+    pub days: Option<u32>,
+}
+
+
 /// Get current price for a single symbol
 /// First tries external API, saves to PocketBase, then falls back to manual price if API fails
 pub async fn get_price(
@@ -216,6 +224,22 @@ pub async fn get_prices_batch(
     
     Ok(Json(results))
 }
+
+/// Get price history for a symbol
+pub async fn get_price_history(
+    State(state): State<AppState>,
+    Path(symbol): Path<String>,
+    Query(query): Query<GetHistoryQuery>,
+) -> Result<Json<Vec<crate::services::price_service::HistoryEntry>>, AppError> {
+    let asset_type = parse_asset_type(&query.asset_type)?;
+    let market = query.market.as_ref().map(|m| parse_market(m)).transpose()?;
+    let days = query.days.unwrap_or(30);
+
+    let history = state.price_service.get_price_history(&symbol, &asset_type, market.as_ref(), days).await?;
+    
+    Ok(Json(history))
+}
+
 
 /// Clear price cache
 pub async fn clear_price_cache(
